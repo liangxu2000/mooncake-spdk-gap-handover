@@ -101,6 +101,12 @@
 - GAP-05 借来的 liburma（`/home/g00953922/...`）：**第三方目录、版本未确认**。
 - node2 的 `urma_perf`（`c39b3489…`）：来源链 = `e12b7cb21` + 本地修改，但**5 个 SPDK diff 未采集**，暂不算"可证明"。
 
+**解决路径（2026-11-19 用户定）**：同事把两台机器的完整工作区（commit + 全部本地修改 + 未跟踪文件）**提交并推送到 GitHub**；我们从 git 拉取源码，在 `~/gap` 内编译，**只运行 gap 内产物**。推送清单（发给同事）：
+1. **SPDK**（`yyyuanhao426-hash/spdk`）：以 `e12b7cb21` 为基，提交 node2/node4 工作区的全部修改（至少 7 个文件 + 未跟踪的 `lib/nvme/nvme_p99_v7.h`），push 到分支；给 **分支名 + commit**。
+2. **Mooncake**（`LeeJace993/Mooncake`）：以 `706551a8` 为基，提交 `mooncake-930` 工作区的全部修改（7 处，含 2 个未跟踪构建脚本），push 到分支；给 **分支名 + commit**。
+3. 附：`git submodule status` 输出、构建用的 cmake/flags、以及**当前二进制对应的 commit**（用于核对）。
+拿到以上信息后，GAP-06 改为：gap 内 clone/checkout → 编译 → `strings` 验证特征 → 实测。
+
 规则：
 1. **诊断完成前不改代码**（GAP-06 只测量）。
 2. **改动前先冻结基线**：对将要修改的每一棵树，采集并归档到 `~/gap/baseline/`：
@@ -444,7 +450,8 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 > **⛔ 阻断原因（2026-11-19 用户要求）：代码版本未确认。**
 > 本任务书里原先计划使用的 node3 `nvmf_tgt e7440ae0…`、e3bd master/client、node1 `stress_cluster_bench`、第三方 liburma、node2 `urma_perf` **均属"来源未确认"**，一律不得运行。
-> **解除条件**：用户在会话中明确指定 SPDK 与 Mooncake 各自使用的版本（`仓库 + commit`，以及是否包含机器上的本地修改），并确认是否允许在 `~/gap` 内从该源码编译。解除后本任务按下述流程改为"确认源码 → 在 gap 内构建 → 只运行 gap 内产物"。
+> **解除条件（2026-11-19 用户定）**：同事把完整工作区（commit + 全部本地修改 + 未跟踪文件）推送到 GitHub；用户在会话中给出 repo / 分支 / commit。
+> 解除后本任务改为：在 `~/gap` 内 clone/checkout 该 commit → 编译 SPDK（`nvmf_tgt`、`urma_perf`）与 Mooncake（`mooncake_master`、`mooncake_client`、`stress_cluster_bench`）→ 记录构建配置与产物 md5 → `strings` 验证（V3/DUMP_SEC 等）→ 再执行下述实测。**只运行 gap 内产物。**
 >
 > **以下内容在解除前不得执行。**
 >
