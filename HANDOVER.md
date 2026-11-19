@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-05（工具补齐与可行性验证，只读 + 仅写 `~/gap`，可立即执行）**；GAP-06（首轮实测）待 GAP-05 回执 + 用户对高风险操作的逐项确认
+- 当前任务：**GAP-06（首轮实测，已定稿，可执行）**
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -112,8 +112,8 @@
 | GAP-02（原 R7-02） | 2026-11-19 | 只读：补 H 节（源码/二进制归属 + 未提交文件 diff）+ 打点能力核对 + 实测参数匹配事实 | 已关闭 | 三套打点在三个二进制均可用（V3 env 串在，魔数不显）；两节点 `nvmf_tgt` 非同一文件（被测 target 在 node4）；`-L`/`-I` 实际相同，实质差异只剩 `-s` 与 taskset；源码树 7 处未提交改动（node2 多 `urma.c` +44 行）；Mooncake 客户端运行期 liburma 为第三条路径（md5 `87d4fb60…`）；ns 容量 84.5 TB = Mooncake 工作集的 15.4 倍；V3 源码在 HEAD（宏拼接，回执"源码已不在磁盘"的判断需更正） |
 | GAP-03 | 2026-11-19 | 只读条件审计：把同事全部实验逐臂提取「客户端/target/master 节点、数据路径是否跨节点、参数与库」，标出同节点/条件不可比的数字 | 已关闭 | 归档结果中**没有** initiator=target 同节点的 8 MiB gap 对比（R5/R6/R11 均 node2→node4，R11 有 includes_same_host=False）；r7bi 系列 target 在 node2 且无测量输出，不可用；`0.4667 ms vs 259.92 µs` 因 strip 256 vs 128 + taskset/-s 不同**不可比**；R6 rand 655.6 vs 327.2 因随机范围 15.4× **不可比**；R6 seq 466.6 vs 245.7 仅差 taskset/-s；可用基线=Round6 框架内 Mooncake 各臂与 R6 SPDK 各臂自身 |
 | GAP-04 | 2026-11-19 | 新环境接入与只读侦察：node1/node3 连接与角色、硬件/盘/URMA、代码与二进制（含 V3 打点）、端口占用、工作集与容量 | 已关闭 | 两台可登录、不同物理机；文档角色 node1=initiator/client、node3=target/master；node3 的 `nvmf_tgt` 带完整 V3（md5 `e7440ae0…`），**node1 的 `urma_perf` 与我方 Mooncake 客户端均不带 V3**；盘各 11×7.68 TB；4457 空闲；node3 的 50056/8086/9006/50156 被**本方 23 h 遗留进程**占用；工作集=0；node3 大页 9.06 GB（iobuf 需 ~8.06 GB，余量小）；两台 liburma `5c021f7f…`（≠ node2/4） |
-| GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 待执行 | — |
-| GAP-06 | 2026-11-19 | 首轮实测（待 GAP-05 回执 + 高风险操作逐项确认）：按端口规范起本方 target/master + prefill；同参数 6 臂 × 60 s，客户端 V3 逐请求账本 + target 聚合 dump，输出各段分解 + 条件台账 | 待执行 | — |
+| GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
+| GAP-06 | 2026-11-19 | 首轮实测（已定稿，用户已授权）：node3 起 target(4457)/master(50056/8086/9006) + 注册 NoF 段 + 3.81 TiB prefill；6 臂 × 60 s（Mooncake `stress_cluster_bench` 4t/1t × seq/rand；urma_perf seq/rand），target 聚合 + 客户端账本（Mooncake LEGACY / urma_perf V3） | 待执行 | — |
 
 ---
 
@@ -367,7 +367,9 @@ GAP-06 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 
 ---
 
-# GAP-05（待执行 · 2026-11-19）· 工具补齐与可行性验证（只读 + 仅写 `~/gap`）
+# GAP-05（已关闭 · 2026-11-19）· 工具补齐与可行性验证（只读 + 仅写 `~/gap`）
+
+> 回执已收（见任务历史摘要）。三处需要记住的事实：①**node1 本机已有 `stress_cluster_bench`**（不是没有 bench）；②Mooncake 客户端与 bench 都**只有 LEGACY 慢 IO、没有 V3 buffer**；③node3 大页总够但**每 NUMA 仅 1160 页**，iobuf 可能需按节点补页。
 
 > **约束**：gap 外只读；所有复制/解包/试运行都在 `~/gap`；**除 §0 用户已授权的两个遗留进程外，不启停任何服务**；不连 target、不跑流量、不 takeover。允许 `--help` / `-h` / `ldd` / `strings` 级验证。
 
@@ -414,13 +416,20 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 ---
 
-# GAP-06（待执行 · 2026-11-19，待 GAP-05 回执后定稿）· 首轮实测：同参数 target 下 Mooncake vs 裸 SPDK 的 8 MiB 读双层账本
+# GAP-06（已定稿 · 2026-11-19）· 首轮实测：同参数 target 下 Mooncake vs 裸 SPDK 的 8 MiB 读双层账本
 
-> **硬门：只有用户在本轮对话中明确宣布"独占"（例如"现在可以独占/佛挡杀佛"）才允许执行 §1 及之后的所有步骤。若未明确宣布：只做 §0 只读预检，然后停手回报；不得启动 target、不得停任何进程。**
-> 目标：把 ~200 µs（同口径 222 µs）差距定位到具体层/段。**本轮不改代码、不重编、不优化。**
-> 预计占机 60–90 min（含我方 master 启动与 prefill）。机器：**node1 = initiator/client，node3 = target/master（已确认）**；两台不同物理机，数据跨机。**高风险操作已获用户 2026-11-19 整体授权**（停资源占用者、vfio 接管/还原、启停本方 target/master）；必须按 PID、禁 pkill/killall、不 reboot、不 rmmod udma、不动他人进程；异常即停并回报。
-> **定稿前置（GAP-05 回执）：①node1 上可用的 Mooncake 客户端与带 V3 的 urma_perf；②50156 的实际开关；③node3 大页是否够 iobuf；④node3 的端口处置方案（用户确认）。**
-> **GAP-03 审计结论（2026-11-19）**：历史 `0.4667 ms vs 259.92 µs` 因 strip 256/128 与 taskset/-s 不同，**不构成同参数对照**；R6 rand `655.6 vs 327.2` 因随机范围 15.4× **不可比**；R6 seq `466.6 vs 245.7` 仅差 taskset/-s。**本轮必须由我方在同一窗口重测两侧基线**；历史数字只作漂移参考（R6 MC seq_a vs seq_b 的 p99 漂移 0.0073 ms 可作噪声标尺）。
+> **门槛状态**：用户已宣布 node1/node3 独占（2026-11-19）；高风险操作（按 PID 停进程、vfio 接管/还原、启停本方 target/master）已整体授权。仍禁：pkill/killall、reboot、rmmod udma、动系统服务/他人进程；异常即停并回报。
+> 目标：在 node1/node3 上建立**自有基线**并定位 Mooncake 与裸 SPDK 的 8 MiB 读差距。**不改代码、不重编、不优化。**
+> 机器：**node1 = initiator/client，node3 = target/master**；两台不同物理机，数据跨机。
+> 预计占机 60–90 min（含 target/master 启动、NoF 注册、3.81 TiB prefill）。
+>
+> **GAP-05 定稿决策（2026-11-19）**：
+> 1. **Mooncake 臂驱动 = `stress_cluster_bench`**（`segment_read` / `segment_write`）；不启动 `mooncake_client` 服务。
+> 2. **客户端账本口径（不对称，必须写进匹配矩阵）**：Mooncake 臂只有 **LEGACY 慢 IO**（`SPDK_URMA_STAGE_TRACE_US` + `URMA_SLOW_IO`，SINK=0，无 V3 buffer）；裸 SPDK 臂用 **V3 全量逐请求**（`SINK=buffer`）。
+> 3. **liburma 统一**：所有 initiator 进程 `LD_LIBRARY_PATH=~/gap/lib`（`5cbe9f65…`）；target 用其自身 ldd 解析的库（记录 md5）。
+> 4. **大页**：允许 takeover 脚本自动上调 `nr_hugepages`；若 NUMA 本地页不足导致启动失败，可按节点补页（记录前后值，可回退）。
+> 5. **基线口径**：本环境（target `e7440ae0…`、liburma `5cbe9f65…`、e3bd build）与 Round6 不同，**数字不与 Round6 并列**；本轮 Mooncake vs urma_perf 的差值是唯一 gap 结论，历史数字只作漂移/量级参考。
+> 6. **GAP-03 审计**已证明历史数字对条件不全同（strip/taskset/-s/范围），不参与结论。
 
 ## 0. 预检（只读；未授权时到此为止）
 
@@ -428,92 +437,104 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
   节点角色与 IP（initiator / target / master）、**数据是否跨节点**；盘列表与顺序、BDF、strip；target 参数（`-m/-C/-I/-O/-L` 路径+md5、taskset、`-s`、transport、listener）；客户端 env（workers、chunk bytes、qpairs、liburma 路径+md5、打点 env）；负载参数（I/O 大小、seq/rand、seed、随机范围/`--range-bytes`、QD/批次、时长、warmup、measure mode）；跑前/跑中他人负载采样；起止时间与命令原文。
   **回执必须附台账；缺台账的臂，其数字不进 gap 结论。**
 - **0.0b 匹配矩阵**：列一张表 `参数 | Mooncake 臂 | urma_perf 臂 | 是否一致 | 处理`，覆盖：节点角色、盘/顺序、strip、iobuf、max_io_size、C、mask、taskset、`-s`、transport、I/O 大小、QD、随机范围、warmup、时长。不一致的必须标 `有意变量` 或 `无法匹配（原因）`；**未在矩阵中列出的差异，不得用于结论**。
-- **0.1 独占判定**（按 §独占判定规范）：node1/node3 可疑进程 10 s `/proc` 差值与绑核空闲率；他人负载 >1% 单核则停手回报（除非用户当轮明确要求带载跑）。记录 load、`mpstat`。
-- **0.2 V3 源码核对（纠正 GAP-02 H3 的推断）**：
-  - `git -C <spdk树> ls-tree HEAD include/spdk_internal/urma_stage_buffer.h` → 记录是否存在与 blob hash；
-  - `grep -n "URMA_STAGE_ENV" <spdk树>/include/spdk_internal/urma_stage_buffer.h` → 证明确为宏拼接（`URMA_STAGE_ENV "SINK"`），所以源码 grep 全名为 0 属正常；
-  - `git -C <spdk树> status --porcelain include/spdk_internal/urma_stage_buffer.h` → 应为空（未修改）。
-- **0.3 发起 NoF 读的进程**：确认 `benchmark.py` 运行时真正发起 NoF 读的是哪个进程（python 基准进程 vs `mooncake_client` 服务），给依据（`/proc/<pid>/environ` 里的 SPDK env、线程名、fd、日志）。V3 env 只加在该进程上——V3 文件用 O_EXCL 打开，同一路径被两个进程打开会 abort。
-- **0.4 内存**：node1/node3 `free -g`；V3 每条记录 192 B，按 12,000,000 条预分配 ≈ 2.3 GB/进程。
-- **0.5 `--range-bytes` 语义**：给出 urma_perf `--range-bytes` 的 usage 与代码位置（`文件:行号`），确认它如何把随机范围限制到指定字节数。
-- **0.6 快照**：现有 target/master/client 进程与端口；master metrics 的 NoF 段与已分配字节（复核 500k keys）。
-- **0.7 确认 target 当前确实停止**（旧 listener 未监听、vfio 无设备）。
-- **0.8 端口预检**：
-  - 按《端口规范》核实五个端口的实际开关（master 三个 flag 已知；client 50156 的开关必须核实，含 `MC_MIN_RPC_PORT/MC_MAX_RPC_PORT` 的临时端口段限制）；
-  - 占用检查：`ss -ltnp | grep -E ':(4457|50056|8086|9006|50156)\b'`；被他人占用 → 停手回报；
-  - 解释器脚本副本：确认 `target_nvme_takeover.sh:96` 的 `LISTEN_PORT=4420`，准备副本改为 4457。
-- **0.9 我方 master 与 keys 影响（必读）**：
-  - 旧 master（Round6 那个）保持不动；本轮按端口规范起**我方新 master**（50056/8086/9006）。新 master 没有旧元数据，**500k keys 需要本轮重新 prefill**；除非预检发现旧 master 启用了 snapshot/restore（检查命令行与 snapshot 目录）——若有，先回报再定。
-  - **prefill 会覆盖盘上旧数据**：旧 master 的 keys 在本轮之后将不可用。用户 2026-11-19 已明确接受该副作用；进入 §1b 前在回执里写明即可。
-  - 若 prefill 预计耗时超过 30 min 或失败 → 停手回报。
+- **0.1 独占判定与处置**：node1/node3 可疑进程 10 s `/proc` 差值与绑核空闲率；他人负载 >1% 单核时，按 PID 停掉占用者（用户已授权，先 TERM 后 KILL；禁 pkill/killall），记录证据；不动系统服务。记录 load、`mpstat`。
+- **0.2 target 二进制/库/设备核对（只读）**：
+  - `ldd` node3 的 `nvmf_tgt`（`e7440ae0…`）→ liburma / liburma_common 路径 + md5；记录下来作为 `-L` 依据（若解析为 `/usr/lib64`，`-L` 就传 `/usr/lib64`）。
+  - 从 e3bd runtime 日志/文档确认 target 使用的 URMA 设备名；与 initiator 的 `-device_name` 一致。若与 `udmac1d1e2` 不同，以实际为准并记录。
+  - `strings` 复核 target 二进制含 `SPDK_URMA_STAGE_TARGET_SINK` / `SPDK_URMA_TARGET_DUMP_SEC`。
+- **0.3 bench 语义核对（只读）**：打出 `stress_cluster_bench --help` 全文（或从源码确认），逐项确认：`-master_server`、`-master_admin_port`（必须 9006）、`-metadata_server`（必须 `http://<node3>:8086/metadata`）、`-protocol ub`、`-device_name`、`-scenario segment_read/segment_write`、`-replica_num 0`、`-nof_replica_num 1`、`-nof_qpairs_per_segment 4`、`-batch_size 1`、`-shuffle_seed`、`-duration`、`-num_keys`、`-value_size`、`-warmup_keys`、`-nof_segments`、`-global_segment_size` 的语义。**若有任一项与§2 命令不符 → 停手回报，不改方案。**
+- **0.4 NoF 注册工具（只读 + 复制到 gap）**：把 node3 的 `nof_register` / `nof_unregister`（e3bd runtime 内）复制到 node1 的 `~/gap/`（只读源、写 gap）；`--help` 取关键参数；确认注册命令能把 target `4457` 注册到 master `50056`。当前 master metrics 里有一条 `trsvcid:4457` 但容量 0 的记录 → 确认是否需要先 unregister 再 register。
+- **0.5 大页与 NUMA（只读）**：node3 `HugePages_*` 与**每个 NUMA 节点**的空闲页；按 iobuf `8192,8192,1024,8388608`（≈8256 MiB）与 taskset `2-7`（属 node0）判断单 NUMA 是否够；不够时按节点补页（记录前后值，可回退）。
+- **0.6 内存**：node1/node3 `free -g`；V3 只用于 urma_perf 臂（每进程按 12,000,000 条 ≈ 2.3 GB 预留）。
+- **0.7 端口与 target 状态**：4457/50056/8086/9006/50156 全空闲；target 未运行、vfio 设备数 0、无旧 listener。
+- **0.8 master 与 keys（必读）**：本轮在 **node3** 起我方新 master（50056/8086/9006）；旧进程已停、无 snapshot → **500k keys 需本轮 prefill**。用户 2026-11-19 已接受 prefill 覆盖盘上旧数据。
+- **0.9 命令预写**：开始前把每臂的完整命令、env、预期输出文件写进 `meta.md`；执行中任何偏离 → 停手回报，不临场改参数。
 
 ## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致；listener=4457）
 
 - 复制 `target_nvme_takeover.sh` 到 `~/gap/<本轮目录>/`（gap 外只读复制，不改编），**只把副本里的 `LISTEN_PORT` 改为 4457**；记录原/新脚本 md5 与 1 行 diff。
-- 用副本启动，参数与 Mooncake 侧一致：
-  外层 `taskset -c 2-7`；`-R 256 -m 0xfc -C 64 -O 8388608 -I 8192,8192,1024,8388608 -N udmac1d1e2 -L /home/tong/umdk_gpu_isolated/lib -p urma -s 10 -y`
-  盘序与 Round6 相同（11 块数据盘，按脚本现算的字典序）。
+- 用副本启动：外层 `taskset -c 2-7`；`-R 256 -m 0xfc -C 64 -O 8388608 -I 8192,8192,1024,8388608 -N <§0.2 确认的设备名> -L <§0.2 确认的库目录> -p urma -s 10 -y`
+  盘序：11 块数据盘，按脚本现算的顺序（记录成员盘与顺序）。
 - 若 target 上已有旧 listener（4420/4421）→ 先 `nvmf_subsystem_remove_listener` 再加 4457；记录命令原文。
 - 记录：完整命令行原文、PID、启动时间、listener、`nvmf_tgt` md5、`/tmp/nvmf_tgt.log` 路径。
 - 验收：**4457** 监听；`/tmp/nvmf_tgt.log` 出现 URMA target timing 头部。
 - **不动旧 master。**
 
-## 1b. 启动我方 master（新端口）+ prefill
+## 1b. 启动我方 master（node3，新端口）
 
-- 在 node1 起我方 master：`--rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006`（其余参数照 GAP-04 侦察到的本机 master 启动方式逐项记录原文；**不动任何既有进程**）。
-- 客户端 / NoF 注册指向 `50056`；NoF 注册端口 `4457`。
-- **prefill：500k keys × 8 MiB = 3.81 TiB**，用 Round6 驱动的首次写入路径（`--reuse-keys` 关、`--keep-keys` 开；具体参数照 Round6 脚本）。记录写入量、耗时、失败数。
-- 验收：master key 数 = 500000；NoF 段挂载；`master_nof_allocated_bytes` = 4,194,304,000,000（允许等价误差）。失败或预计超过 30 min → 停手回报。
-- 之后各 Mooncake 臂用 `--reuse-keys` 复用本轮 keys。
+- 在 node3 起 e3bd `mooncake_master`：`--rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006 --nof_heartbeat_interval_sec=120 --nof_heartbeat_failures_threshold=5`（心跳参数只作健壮性，不影响数据面；记录原文）。日志写 `~/gap/...`。
+- 验收：三个端口监听；`curl :9006/metrics` 可读。
+
+## 1c. 注册 NoF 段
+
+- 用 §0.4 的工具把 target `4457` 注册到 master `50056`；若已有容量 0 的同名记录，先 unregister 再 register（记录命令原文）。
+- 验收：metrics 里 `nof_segment_total_capacity_bytes{... trsvcid:4457 ...} > 0`，端点/设备名正确。
+
+## 1d. prefill（500k × 8 MiB = 3.81 TiB）
+
+- 用 `stress_cluster_bench -scenario segment_write -role writer`：
+  `-protocol ub -device_name <设备> -master_server <node3>:50056 -master_admin_port 9006 -metadata_server http://<node3>:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912`
+- 若 `-global_segment_size 0` 导致 setup 失败 → 回落默认 4 GB 并记录。
+- 记录写入量、耗时、失败数；验收 `master_nof_allocated_bytes = 4,194,304,000,000`（允许等价误差）。超过 30 min 或失败 → 停手回报。
 
 ## 2. 测量臂（每臂 60 s；顺序如下）
 
-客户端公共 env（只加在 §0.3 确认的进程上；路径每臂唯一且事先不存在）：
+**Mooncake 臂公共 env（LEGACY 口径，SINK=0）**：
 ```
+LD_LIBRARY_PATH=~/gap/lib
+SPDK_URMA_STAGE_TRACE_US=500
+SPDK_URMA_TRACE=1
+```
+（阈值 500 µs 只打印慢 IO；60 s 内日志 >500 MB → 停手回报。`SPDK_URMA_TRACE=1` 保留每轮最后 8192 条 tx/rx CSV。）
+
+**urma_perf 臂公共 env（V3 全量口径）**：
+```
+LD_LIBRARY_PATH=~/gap/lib
 SPDK_URMA_STAGE_TRACE_US=1
 SPDK_URMA_STAGE_READER_SINK=buffer
-SPDK_URMA_STAGE_READER_PATH=<每臂唯一路径>
+SPDK_URMA_STAGE_READER_PATH=~/gap/<本轮>/<arm>.v3
 SPDK_URMA_STAGE_READER_CAPACITY=12000000
-MC_NOF_PORT=4457
-（客户端 RPC 50156 按 §0.8 核实出的开关显式设置；若不可设 → 停手回报）
 ```
-target 侧：`-s 10`（聚合 dump 进 `/tmp/nvmf_tgt.log`）。
+target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
-| 臂 | 配置 |
+| 臂 | 命令/配置 |
 | --- | --- |
-| G3-1 | Mooncake seq，4 workers（沿用 Round6 驱动，指向我方 master:50056，`--reuse-keys --no-start-env`，时长 60 s） |
-| G3-2 | Mooncake rand，4 workers（同上） |
-| G3-3 | Mooncake seq，1 worker（`--nof-workers 1`） |
-| G3-4 | Mooncake rand，1 worker |
-| G3-5 | urma_perf seq：与 Round6 相同的调用（`-w read -o 8388608 -T 1 -b 1 -t 60 -n 1 -g 0 -l 0 -M cpu`，`URMA_PERF_ADDR_MODE=seq`，seed 20261115） |
-| G3-6 | urma_perf rand：同上但 `URMA_PERF_ADDR_MODE=rand`，加 `--range-bytes 5497558138880`（对齐 Mooncake 池容量） |
-| G3-7（可选） | urma_perf rand 全 namespace（不加 `--range-bytes`，复现 Round6 的 327 µs 口径） |
+| G6-1 | Mooncake `segment_read`，4 线程，顺序：`-role reader -protocol ub -device_name <设备> -master_server <node3>:50056 -master_admin_port 9006 -metadata_server http://<node3>:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0` |
+| G6-2 | 同 G6-1，`-shuffle_seed 20261115` |
+| G6-3 | 同 G6-1，`-num_threads 1` |
+| G6-4 | 同 G6-2，`-num_threads 1` |
+| G6-5 | `urma_perf -w read -o 8388608 -T 1 -b 1 -t 60 -n 1 -g 0 -l 0 -M cpu`，`URMA_PERF_ADDR_MODE=seq`（若该 env 不存在 → 顺序 LBA CSV + `--lba-plan`） |
+| G6-6 | 同 G6-5，rand：`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115 --range-bytes 4194304000000`（若 env 不存在 → 固定种子随机 LBA CSV + `--lba-plan`） |
+| G6-7（可选） | 同 G6-6，不加 `--range-bytes`（全 namespace，仅量级参考） |
 
-每臂记录：起止时间、实际命令/env、benchmark summary（avg/p50/p99/QPS）、V3 文件路径+大小、target 日志时间窗、跑中他人负载采样。
-- Mooncake 臂的 client 进程必须**正常退出**（自然退出或 SIGTERM，禁止 SIGKILL）才触发 V3 落盘。
-- 若启动时报 "buffer sink requires PATH" 或 O_EXCL 失败 → 记录并停，不自行换方案。
+每臂记录：起止时间、完整命令/env、bench/urma_perf 输出（avg/p50/p90/p99/p99.9/max、QPS）、V3 文件路径+大小、target 日志时间窗、跑前/跑中他人负载采样、日志大小。
+- Mooncake bench / urma_perf 必须**正常退出**（SIGTERM 可，禁 SIGKILL），否则 V3/CSV 不落盘。
+- 若出现 undefined symbol、buffer sink 报错、`-global_segment_size 0` setup 失败 → 记录并停（`-global_segment_size` 可回落默认 4 GB 并记录），不自行改其它参数。
 
 ## 3. 聚合与分析（原始文件不上传）
 
 - V3 文件留在 **initiator 节点（node1）的 `~/gap/...`**；回执给 `~/gap` 下的相对路径与 md5。
-- 用本仓脚本生成每臂聚合表：
+- **urma_perf 臂**：用本仓脚本生成聚合表：
   ```
   python3 scripts/decode_urma_stage_v3.py <v3文件> --out <arm>_agg.txt
   ```
-- 回执给出每臂：`decoded/valid/dropped`、`roundtrip_us` 与各分段（`rx_buffer/buffer_exec/bdev/bdev_post/data/residual/outside`）的 `mean/p50/p90/p99/p99.9/max`（µs）、benchmark summary 的 `avg/p50/p99`、target 聚合 dump 最后两个 10 s 块原文。
-- 另给对照：同臂 traced E2E 与 Round6 未打点值（Mooncake seq 467 µs / rand 656 µs；urma_perf seq 246 µs / rand 327 µs）之差，用于判断打点开销。
+  回执给 `decoded/valid/dropped`、`roundtrip_us` 与各分段（`rx_buffer/buffer_exec/bdev/bdev_post/data/residual/outside`）的 `mean/p50/p90/p99/p99.9/max`（µs）。
+- **Mooncake 臂**：给 bench 自己打印的时延统计（avg/p50/p90/p99/p99.9/max、QPS）；给 `URMA_SLOW_IO` 行数与其中 `target_us/bdev_us/data_us/outside_us/residual_us` 的分布（用 awk 汇总，≤30 行）；给 `SPDK_URMA_TRACE` CSV 的行数（如有）。
+- 每臂都给 target 聚合 dump 最后两个 10 s 块原文（`W9 exec->cpl` 与 `push JFC wait (C2H)`）。
+- **跨层算式**：`客户端+网络 = E2E − target_us`（用各自的均值与 p99 分别算）；不得把 Mooncake 的 LEGACY 慢 IO 分布与 urma_perf 的 V3 全量分布直接并列，写进匹配矩阵的"口径"列。
+- **不与 Round6 数字并列**；历史数字只作量级参考。
 
 ## 4. 收尾与回退
 
 - 停 client / urma_perf（自然退出，等 V3 落盘）；target 用 SIGTERM 停（**不要 SIGKILL**），确认 `/tmp/nvmf_tgt.log` 尾部完整。
-- 停我方 master（记录 PID，SIGTERM）；**旧 master 全程不动**。
+- 停我方 master（记录 PID，SIGTERM）；不动他人进程。
 - 若本轮做过 disk takeover：`target_nvme_takeover.sh -r` 还盘，确认盘回 nvme、4457 不监听、vfio 设备数 0。
 - 回退：旧 master 不动；若 target 起不来或 prefill 失败 → 停手回报，不重启旧 master、不擅改端口。
-- 结束态：target 停、盘还原、我方 master 停、旧 master 原样；在回执里写明"prefill 已覆盖盘上旧数据，旧 master 的 keys 不可用"。
+- 结束态：target 停、盘还原、我方 master 停；本轮 prefill 前工作集为 0，无旧 keys 被覆盖。
 
 ## 5. 约束
 
-- 共用机红线：**仅在用户明确"独占"后**按 PID 停资源占用者；禁 pkill/killall；不 reboot；不 rmmod；不动他人 master/client。
+- 用户已宣布独占（2026-11-19）：**按 PID 停进程已授权**；仍禁 pkill/killall、reboot、rmmod udma、动系统服务/他人进程。
 - **工作目录铁规**：node1/node3 上所有写入只在 `~/gap` 内；gap 外只读，严禁修改/删除/移动/创建（见《工作目录铁规》）。
 - 不改代码、不重编；只用 GAP-05 验证过的现有二进制（md5 以 GAP-05 回执为准）。
 - 资料最小化：V3 原始文件不传；每臂聚合表 ≤40 行。
@@ -521,4 +542,4 @@ target 侧：`-s 10`（聚合 dump 进 `/tmp/nvmf_tgt.log`）。
 
 ## 回执必答的一句话（第一行）
 
-各臂是否全部完成；每臂 V3 的 `count`/`dropped`；Mooncake 与 urma_perf 在 `roundtrip`、`bdev`（W9）、`data`（C2H）三项上的均值与 p99 差值。
+各臂是否全部完成；prefill 耗时；Mooncake 与 urma_perf 的 E2E、target `bdev`（W9）、`data`（C2H）三项的均值与 p99 差值；各自客户端账本口径（LEGACY vs V3）与样本量。
