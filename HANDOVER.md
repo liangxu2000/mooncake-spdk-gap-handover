@@ -91,6 +91,22 @@
 5. **打点缺口如实记录**：若 Mooncake 客户端拿不到 V3/慢 IO 账本，就用 target 聚合 dump + 客户端 E2E + 可行的 Mooncake 慢请求通道；把"客户端账本缺失"写进匹配矩阵与回执，**不用其他层的数据冒充**。
 6. **不碰 gap 外**：构建产物、日志、结果、脚本副本全在 gap。
 
+## 代码基线与变更管理（2026-11-19 开发侧定）
+
+现状：GitHub 只有 commit（SPDK `e12b7cb21` / Mooncake `706551a8`），机器上有未提交修改；node1 是更旧的 `6ceebf91`；node3 的树无 `.git`（部分无源码）。**因此"直接改机器上的代码"不可接受——无法证明改的是哪个基线，也无法回退。**
+
+规则：
+1. **诊断完成前不改代码**（GAP-06 只测量）。
+2. **改动前先冻结基线**：对将要修改的每一棵树，采集并归档到 `~/gap/baseline/`：
+   - `git rev-parse HEAD`、`git status --porcelain`、**全部** `git diff`（`base64 -w0` 分文件 + patch md5）、未跟踪文件清单+md5、构建配置（`build/mk/config`、编译器版本）、二进制 md5。
+   - 无 `.git` 的树：记录整树清单与逐文件 md5；确认是否有可用源码。
+3. **基线选择按层**：
+   - target / NoF 数据面 → SPDK。优先 `e12b7cb21` + node2/node4 的**全部**本地修改（目前只取了 2 个文件的 diff，还缺 5 个）。node3 的 `e7440ae0` 二进制若无法证明来自该基线 → **重建后先复测基线**，达标再进入对照。
+   - 客户端 / master → Mooncake。优先 `706551a8` + node2 树的 7 处本地修改；node3 的 e3bd 构建源码只截到 `mooncake-store/src`，需确认完整性。
+4. **所有修改以补丁形式**（diff + base64 + md5）在 `~/gap` 的副本上打，**不改任何原位目录**；回退 = 用归档恢复 + md5 校验。
+5. **无法证明源码一致时**：要么重建并重测基线，要么只做运行时/参数层调整，不碰源码。
+6. GAP-06 的 §0.10 先做**只读代码冻结**并产出 `baseline/MANIFEST.md`；任何源码修改之前必须以该清单为基准。
+
 ## 背景与总目标（供理解任务用，回执不必复述）
 
 项目总目标：**消除 Mooncake 与裸 SPDK 在 8 MiB 读上的 ~200 µs 时延差距**。这是同事交接的原始问题，
@@ -115,7 +131,7 @@
 | GAP-03 | 2026-11-19 | 只读条件审计：把同事全部实验逐臂提取「客户端/target/master 节点、数据路径是否跨节点、参数与库」，标出同节点/条件不可比的数字 | 已关闭 | 归档结果中**没有** initiator=target 同节点的 8 MiB gap 对比（R5/R6/R11 均 node2→node4，R11 有 includes_same_host=False）；r7bi 系列 target 在 node2 且无测量输出，不可用；`0.4667 ms vs 259.92 µs` 因 strip 256 vs 128 + taskset/-s 不同**不可比**；R6 rand 655.6 vs 327.2 因随机范围 15.4× **不可比**；R6 seq 466.6 vs 245.7 仅差 taskset/-s；可用基线=Round6 框架内 Mooncake 各臂与 R6 SPDK 各臂自身 |
 | GAP-04 | 2026-11-19 | 新环境接入与只读侦察：node1/node3 连接与角色、硬件/盘/URMA、代码与二进制（含 V3 打点）、端口占用、工作集与容量 | 已关闭 | 两台可登录、不同物理机；文档角色 node1=initiator/client、node3=target/master；node3 的 `nvmf_tgt` 带完整 V3（md5 `e7440ae0…`），**node1 的 `urma_perf` 与我方 Mooncake 客户端均不带 V3**；盘各 11×7.68 TB；4457 空闲；node3 的 50056/8086/9006/50156 被**本方 23 h 遗留进程**占用；工作集=0；node3 大页 9.06 GB（iobuf 需 ~8.06 GB，余量小）；两台 liburma `5c021f7f…`（≠ node2/4） |
 | GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
-| GAP-06 | 2026-11-19 | 首轮实测（已定稿，用户已授权）：node3 起 target(4457)/master(50056/8086/9006) + 注册 NoF 段 + 3.81 TiB prefill；6 臂 × 60 s（Mooncake `stress_cluster_bench` 4t/1t × seq/rand；urma_perf seq/rand），target 聚合 + 客户端账本（Mooncake LEGACY / urma_perf V3） | 待执行 | — |
+| GAP-06 | 2026-11-19 | 首轮实测（已定稿，用户已授权）：§0.10 代码冻结（只读，产出 baseline/MANIFEST.md）→ node3 起 target(4457)/master(50056/8086/9006) + 注册 NoF 段 + 3.81 TiB prefill → 6 臂 × 60 s（Mooncake `stress_cluster_bench` 4t/1t × seq/rand；urma_perf seq/rand），target 聚合 + 客户端账本（Mooncake LEGACY / urma_perf V3） | 待执行 | — |
 
 ---
 
@@ -452,6 +468,12 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 - **0.7 端口与 target 状态**：4457/50056/8086/9006/50156 全空闲；target 未运行、vfio 设备数 0、无旧 listener。
 - **0.8 master 与 keys（必读）**：本轮在 **node3** 起我方新 master（50056/8086/9006）；旧进程已停、无 snapshot → **500k keys 需本轮 prefill**。用户 2026-11-19 已接受 prefill 覆盖盘上旧数据。
 - **0.9 命令预写**：开始前把每臂的完整命令、env、预期输出文件写进 `meta.md`；执行中任何偏离 → 停手回报，不临场改参数。
+- **0.10 代码冻结（只读，实验前先做）**：把将来可能修改的代码基线固化到 `~/gap/baseline/`：
+  - node2/node4 SPDK 树：`git rev-parse HEAD`、`git status --porcelain`、**全部 7 个** `git diff`（含此前未展开的 5 个）、未跟踪文件清单 + md5、`build/mk/config` 与编译器版本、两侧二进制 md5；每个 patch `base64 -w0` 保存 + md5。
+  - node1 SPDK 树：HEAD/status/diff（预期干净）；node3 无 `.git` 的树：只记录清单与逐文件 md5，并注明"无源码/无版本"。
+  - Mooncake：node2 `mooncake-930` 的全部 diff + 未跟踪文件 + HEAD；node3 `~/nds/e3bd/Mooncake/build/mooncake-store/src` 的源码完整性与 md5。
+  - 产出 `baseline/MANIFEST.md`：每棵树一行（路径、HEAD、改动文件数、patch md5、二进制 md5、是否可复现），并用一句话回答"将来改代码基于哪棵树、还缺什么"。
+  - **只读采集；patch 只存 `~/gap`，不外传、不进公开仓。**
 
 ## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致；listener=4457）
 
