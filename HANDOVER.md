@@ -529,10 +529,10 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 ## A. 构建（Stage A；失败即停，不进入实测）
 
-> 前置事实（GAP-06）：node1 无外网；SPDK 最新源码已由 Windows 侧中转放入 `~/gap/spdk`（`170cbb94…`）；补丁在 `~/gap/patches/colleague_spdk.diff`（md5 `b70aa91c…`）；`git apply --check -C1` 通过，默认上下文有 1 行失败（usage 里 `default: dmabuf` vs 最新 `default: cpu`）。
+> 前置事实（GAP-06）：**node1 已确认无外网**（GitHub/gitee 均不通）；**node3 尚未测过**；SPDK 最新源码已由 Windows 侧中转放入 `~/gap/spdk`（`170cbb94…`）；补丁在 `~/gap/patches/colleague_spdk.diff`（md5 `b70aa91c…`）；`git apply --check -C1` 通过，默认上下文有 1 行失败（usage 里 `default: dmabuf` vs 最新 `default: cpu`）。
 
 - **A1 依赖预检**：node1/node3 上 `gcc --version`、`cmake --version`、`make --version`、`python3 --version`；DPDK（`/usr/local/lib/libdpdk*` 或 `pkg-config --modversion libdpdk`）、numa、isa-l；Mooncake 需要的 cmake/依赖。**缺什么列清单；能从 Windows 侧获取的走中转；不擅自装系统包。**
-- **A2 源码与子模块**：SPDK 子模块（dpdk/isa-l 等，如需）与 Mooncake 子模块（pybind11 等）在 Windows 侧 `--recurse-submodules` 拉齐，打包转入 gap；记录各 repo 与子模块 commit。**不得使用 gap 外的源码。**
+- **A2 源码与子模块**：**先分别测 node1 / node3 的出网**（`curl -m 8 -I https://github.com`、DNS 解析，各给结果）；**node1 已知不通、node3 未测**。能直连的节点就直接 clone（记录所用路径）；不能直连的走 Windows 侧 `--recurse-submodules` 拉齐后打包中转进 gap。SPDK 子模块（dpdk/isa-l 等，如需）与 Mooncake 子模块（pybind11 等）同法处理；记录各 repo 与子模块 commit。**不得使用 gap 外的源码。**
 - **A3 打补丁**：在 `~/gap/spdk` 上**只应用 `urma_perf.c`**（用 `-C1` 或把补丁上下文改成最新 `default: cpu`）；应用后 `git diff --stat` 应只有 `examples/nvme/urma_perf/urma_perf.c`；保存"实际应用的补丁"与 md5。
 - **A4 编译**：
   - node1：`./configure`（DPDK 路径按 A1）→ `make -j` → `build/examples/urma_perf`；`--help` 应出现 `--range-bytes` / `--lba-plan`；`strings` 应含 `SPDK_URMA_STAGE_READER_SINK` / `SPDK_URMA_STAGE_TRACE_US` / `URMA_SLOW_IO`。
