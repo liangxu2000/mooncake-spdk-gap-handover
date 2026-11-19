@@ -719,11 +719,13 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 ## 5. 测量臂（每臂 60 s；完成一臂立即落盘+marker，再跑下一臂）
 
+> **历史参照（用户提供的 Round5 命令文档，本地）**：Mooncake 用 `run_nof_bench.py`（`--seed 42`、`--warmup-keys 64`、`--capacity 5497558138880`=5 TiB、strip 128）；裸 SPDK 用 `run_exp.sh -S 128 ...`。本轮 bench 工具不同、strip 256，**不与 Round5/6 数字并列**，仅用于核对参数口径（key 数、容量、warmup、慢 IO 阈值 500 µs 均已对齐）。
+
 - **所有臂命令均以 `sudo -n env <下列 env> ` 前缀执行（root，见 D2）**；记录最终命令。
 - Mooncake 公共 env：`LD_LIBRARY_PATH`（§2）、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、`SPDK_URMA_STAGE_TRACE_US=500`、`SPDK_URMA_TRACE=1`。
 - urma_perf 公共 env：`LD_LIBRARY_PATH=~/gap/lib:~/gap/spdk/build/lib`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_STAGE_TRACE_US=1`、`SPDK_URMA_STAGE_READER_SINK=buffer`、`SPDK_URMA_STAGE_READER_PATH=~/gap/results/GAP-08/<arm>.v3`、`SPDK_URMA_STAGE_READER_CAPACITY=12000000`。
 - A1 Mooncake seq 4t：`~/gap/bench/stress_cluster_bench -scenario segment_read -role reader -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0`
-- A2：同 A1，`-shuffle_seed 20261115`
+- A2：同 A1，`-shuffle_seed 42`（与同事 Round5/6 Mooncake 的 `--seed 42` 对齐；urma_perf 仍用 20261115）
 - A3 urma_perf seq：`~/gap/spdk/build/examples/urma_perf -w read -o 8388608 -T 1 -b 1 -t 60 -n 1 -g 0 -l 0 -M cpu`，env `URMA_PERF_ADDR_MODE=seq`
 - A4 urma_perf rand：同 A3，env `URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`，加 `--range-bytes 4194304000000`
 - A5：同 A1，`-num_threads 1`
