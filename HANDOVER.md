@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-14（同并发 + 同 chunk 的配对 A/B，可执行）**；master/target/注册保持运行；GAP-08～11 已中止
+- 当前任务：**GAP-15（32×256KB 对齐 + 每臂 120s 配对，可执行）**；master/target/注册保持运行；不重启 target
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -173,7 +173,8 @@
 | GAP-11 | 2026-11-19 | 清洁 4 臂：10s 无打点探针（确认速率）→ A1/A2 Mooncake seq/rand 4t（120s，seed 0/42）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；两侧均无 client trace，target `-s 10` 为共同口径 | 已中止（仅探针） | 无打点探针仍 **6.70 GiB/s**（打点不是瓶颈）；`-duration` 结束后续读 190s、无 FINAL SUMMARY。源码核实：`ValidateMeasuredRead` 受 `-verify` 门控（默认 true）→ 每 8MiB 读多一次 8MiB 比较（计时区间外），是 ~3.86ms/op 的最可能原因；duration 的 join 在循环后，worker 卡住则不返回。**改单遍 + verify=false** |
 | GAP-12 | 2026-11-19 | 单遍+`-verify=false`（实际执行 v1）：10k 探针定 N → A1/A2 Mooncake seq/rand 4t（单遍 N）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验 | 已完成 | **`verify=false` 让 Mooncake 6.70→26.12 GiB/s（3.9×）**；A1 26.12/1194.03µs/p99 1685.58、A2 26.46/1177.41/1659.20、A3 29.21/267.405/432.64、A4 16.72/467.079/727.04；全部 failed=0、**无一绕回**；target W9/TOTAL 为 per-child（Mooncake 64×128KB、urma 32×256KB）；A1/A2 各 508MB bench breakdown 日志；D12-1 trid 接受、D12-2 key0 被 urma preflight 覆写 |
 | GAP-13 | 2026-11-19 | 只读分析：A1/A2 的 bench 逐请求 breakdown 分解（query/master/transfer/其他）→ 找 breakdown 日志开关 → 查 chunk 128KB vs 256KB 的来源与对齐方法；修正 per-parent vs per-child 口径 | 已完成 | A1/A2 = 11.0% query RPC（131µs）+ 87.6% read（1047µs）+ 0.2% 其他 + 1.2% bench 包装；breakdown 由 `MC_HIFREQ_LOG_SAMPLE_RATE`（默认 1.0）门控；Mooncake 64×128KB 来自 `MC_NOF_SUBMIT_CHUNK_BYTES`；urma 32×256KB 来自 RAID0 NOIOB 256KB；**发现并发不匹配：A1/A2 4t vs A3/A4 -T1** |
-| GAP-14 | 2026-11-19 | 同并发（1 parent in flight）+ 同 chunk（64×128KB）配对 A/B，**每臂严格 120 秒**：10s 1t 探针（duration 10，verify=false，stdbuf）→ A1'/A2' Mooncake seq/rand 1t（duration 120）→ A3'/A4' urma_perf -T1（120s，显式 `SPDK_URMA_MAX_IO_SIZE=131072`）→ 硬校验 child/父=64 + 绕回校验 | 待执行 | — |
+| GAP-14 | 2026-11-19 | 同并发（1 parent in flight）配对 A/B：探针 → A1'/A2' Mooncake 1t → A3'/A4' urma -T1（`SPDK_URMA_MAX_IO_SIZE=131072` 目标 64×128KB）→ chunk/绕回校验 | 已完成（3/4 臂） | A1' 110.35s/294k/20.81GiB/s/avg 375.01/p99 412.19（64×128KB）；A2' 200.16s/11.48GiB/s/avg 680.50/p99 884.86（64）；A3' **硬拒**（max_io 131072 与 -o 8MiB 互斥）；**越权**跑 A3p2 native 32×256KB：120s/457,307 IO/30.49GiB/s/avg 262.32/p99 427.52；A4' 未跑。关键：1 并发 seq 下 target TOTAL 对 chunk 不敏感（124 vs 122µs），Mooncake E2E 375 vs urma 262 → **+113µs**；rand target W9 272µs。**决定：不重启 -R128；改 Mooncake 262144 对齐 32×256KB** |
+| GAP-15 | 2026-11-19 | 32×256KB 对齐（Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`）：10s 1t 探针（120s 预估 ≤2.4663TB 否则停手）→ A1''/A2'' Mooncake seq/rand 1t（120s，seed 0/42）→ A3''复用 A3p2 → A4'' urma rand native（120s）→ child/父=32 硬门 + 绕回校验 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -1004,7 +1005,12 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 
 ---
 
-# GAP-14（待执行 · 2026-11-19 · **每臂严格 120 秒**）· 同并发 + 同 chunk 配对 A/B（1 parent in flight）
+# GAP-14（已完成 · 2026-11-19 · 3/4 臂）· 同并发配对 A/B（1 parent in flight）
+
+> **结果**：A1'/A2'（Mooncake 1t，64×128KB，单遍）完成；A3' 因 `SPDK_URMA_MAX_IO_SIZE=131072` 与 `-o 8MiB` 互斥被 urma_perf 源码硬拒；测试侧**越权**改用 native 跑了 A3p2（32×256KB，120s）；A4' 未跑。
+> **关键事实（1 并发）**：seq 下 target TOTAL 对 chunk 不敏感（64×128KB 124µs vs 32×256KB 122µs）；Mooncake seq E2E **375.01µs** vs urma seq **262.32µs** → **+112.7µs**；rand 下 target W9 从 49.7 跳到 **272.3µs**（随机惩罚在 target 侧），E2E 680.5µs。
+> **D14-1 越权**：A3p2 数据技术有效，**采纳为“非硬门参考臂”**，但不替代配对臂；后续任何超授权动作必须停手回报。
+> **D14-3**：A2' 200s（单遍 N 由 seq 速率算，rand 慢 1.8×）→ 再次证明不能用单遍替代 120s。
 
 > **用户硬要求（2026-11-19）：以后所有臂一律 120 秒，不用单遍校准。**
 > **依据 GAP-13 + 开发侧修正**：A1/A2 是 4 线程（~4 个 parent 在飞），A3/A4 是 -T1（1 个在飞）→ E2E 不可直接比；chunk 为 Mooncake 64×128KB vs urma 32×256KB。
@@ -1042,3 +1048,41 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 ## 回执必答（第一行）
 
 10 s 探针的 FINAL/字节/120s 预估是否 ≤2.4663TB；A1'–A4' 是否都跑满 120 s；**每臂 child/父是否都=64**；每臂 queries/是否 WRAP；1 并发 120 s 下的 E2E 与 target W9/C2H。
+
+---
+
+# GAP-15（待执行 · 2026-11-19 · 每臂 120s）· 32×256KB 对齐（Mooncake 262144）：探针 → A1''/A2'' → A4'' → 分析
+
+> **开发侧决策**：**不重启 target、不改 `-R 128`**（会改变 RAID0 布局 → 现有 2.47TB 数据作废、需重新 prefill ~22min）；改走 **Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`**（纯 env）对齐到 urma 的 **32×256KB**。
+> **复用**：A3p2（urma seq native 32×256KB，120s）**采纳为 A3''**（457,307 IO / 30,487 MiB/s / avg 262.32 / p99 427.52 / 0 errors）；D14-1 的越权行为已记录，后续不得再有超授权动作。
+> **目标**：A1''/A2''（Mooncake 32×256KB）与 A3''/A4''（urma 32×256KB）**同为 1 并发、120s、verify=false、不绕回**。
+> 约束：不重启 target、不补灌、不动 master/target/注册；gap-only（`~/gap/lib_sys`）；root。
+
+## 0. 10 s 探针（Mooncake 262144，1t，duration 10）
+
+- env：`LD_LIBRARY_PATH=~/gap/lib_sys`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、**`MC_NOF_SUBMIT_CHUNK_BYTES=262144`**、`MC_HIFREQ_LOG_SAMPLE_RATE=0.01`；无 trace。
+- 命令同 A1''，但 `-duration 10`；`stdbuf -oL -eL`。
+- 记录 FINAL、failed、10s 字节；**120s 预估 = 10s 字节 × 12**：
+  - 若 > `2,466,250,752,000 B` → **停手回报**（120s 会绕回；等开发侧决定补数据，**不擅自缩短**）；
+  - 若 >60s 未退/无 FINAL SUMMARY/failed>0 → 停手回报。
+
+## 1. 配对臂（每臂 120 s；1 并发；32×256KB）
+
+- **A1'' Mooncake seq 1t**：`-num_threads 1 -duration 120 -num_keys 294000 -verify=false -shuffle_seed 0`，`MC_NOF_SUBMIT_CHUNK_BYTES=262144`，日志 0.01。
+- **A2'' Mooncake rand 1t**：同 A1''，`-shuffle_seed 42`。
+- **A3''**：复用 A3p2 数据（不再跑）。
+- **A4'' urma rand**：`-T 1 -b 1 -t 120`，native（不设 `SPDK_URMA_MAX_IO_SIZE=131072`），`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`，`--range-bytes 5497558138880`。
+- **chunk 硬门**：每臂后 child/父 **必须 32**；不符 → 停手回报。
+- **绕回校验**：A1''/A2'' `queries × 8 MiB` ≤ `2,466,250,752,000`；A4'' 总字节 ≤ `5,497,558,138,880`；超 → `WRAP` 作废停手。
+- watchdog 240 s；无 FINAL SUMMARY → 停手回报。
+
+## 2. 分析 / 回执
+
+- 同口径表：1 并发、120 s、32×256KB；E2E、客户端分解（1% 采样：query/master/transfer）、target W9/push/TOTAL。
+- 对比 A1'' vs A3''（seq）、A2'' vs A4''（rand）；**不再跨 chunk/并发相减**。
+- 标注：非 500k 口径；A3'' 为复用数据。
+- 不清理：master/target 保持运行。
+
+## 回执必答（第一行）
+
+10 s 探针字节与 120s 预估是否 ≤2.4663TB；A1''/A2''/A4'' 是否都跑满 120 s；**child/父是否都=32**；queries/是否 WRAP；1 并发 32×256KB 下的 E2E 与 target。
