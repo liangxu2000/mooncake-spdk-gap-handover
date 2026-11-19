@@ -315,7 +315,7 @@ GAP-04 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
   - 解释器脚本副本：确认 `target_nvme_takeover.sh:96` 的 `LISTEN_PORT=4420`，准备副本改为 4457。
 - **0.9 我方 master 与 keys 影响（必读）**：
   - 旧 master（Round6 那个）保持不动；本轮按端口规范起**我方新 master**（50056/8086/9006）。新 master 没有旧元数据，**500k keys 需要本轮重新 prefill**；除非预检发现旧 master 启用了 snapshot/restore（检查命令行与 snapshot 目录）——若有，先回报再定。
-  - **prefill 会覆盖盘上旧数据**：旧 master 的 keys 在本轮之后将不可用。进入 §1b 前必须把这个副作用写进回执（用户已授权独占即视为知情）。
+  - **prefill 会覆盖盘上旧数据**：旧 master 的 keys 在本轮之后将不可用。用户 2026-11-19 已明确接受该副作用；进入 §1b 前在回执里写明即可。
   - 若 prefill 预计耗时超过 30 min 或失败 → 停手回报。
 
 ## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致；listener=4457）
