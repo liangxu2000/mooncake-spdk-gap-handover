@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-06（只读取补丁 + 适配性验证，可执行）**；GAP-07（构建 + 实测）待补丁适配结果
+- 当前任务：**GAP-07（构建 + 首轮实测，可执行）**
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -101,8 +101,11 @@
 - GAP-05 借来的 liburma（`/home/g00953922/...`）：**第三方目录、版本未确认**。
 - node2 的 `urma_perf`（`c39b3489…`）：来源链 = `e12b7cb21` + 本地修改，但**5 个 SPDK diff 未采集**，暂不算"可证明"。
 
-**解决路径（2026-11-19 用户定，已更新）**：**代码基线 = GitHub 上最新代码**；唯一例外是**随机读补丁**（不在仓里），从同事目录（node2/node4）**只读取回**并应用到 gap 内的最新代码副本上；在 `~/gap` 内编译，**只运行 gap 内产物**。补丁取回与适配由 GAP-06 完成。
-（早期的"让同事推全部工作区"清单仍保留作参考：）
+**解决路径（2026-11-19 用户定；GAP-06 已完成适配验证）**：
+- **代码基线 = GitHub 最新代码**：SPDK `170cbb94…`、Mooncake `af253a2…`。
+- **补丁范围（开发侧决定）**：只应用 **`examples/nvme/urma_perf/urma_perf.c` 的随机读改动**（+145 行；含 `URMA_PERF_ADDR_MODE`、`URMA_PERF_RANDOM_SEED`、`--range-bytes`、`--lba-plan`）。**不带**其余 5 个文件（p99 门控/追踪旁路，读路径不依赖，且最新代码已有自己的 p99 trace 设施）与 node2 独有的 `lib/nvmf/urma.c` WRITE 打点。若构建因此报缺符号 → 停手回报，不擅自扩大补丁面。
+- 随机口径：GAP-07 使用 **`URMA_PERF_ADDR_MODE=rand` + `URMA_PERF_RANDOM_SEED=20261115`**（与 Round6 历史方法一致）；`--lba-plan` 仅作备用，不用于本轮。
+- 全部在 `~/gap` 内 clone/build/运行，**只运行 gap 内产物**。
 1. **SPDK**（`yyyuanhao426-hash/spdk`）：以 `e12b7cb21` 为基，提交 node2/node4 工作区的全部修改（至少 7 个文件 + 未跟踪的 `lib/nvme/nvme_p99_v7.h`），push 到分支；给 **分支名 + commit**。
 2. **Mooncake**（`LeeJace993/Mooncake`）：以 `706551a8` 为基，提交 `mooncake-930` 工作区的全部修改（7 处，含 2 个未跟踪构建脚本），push 到分支；给 **分支名 + commit**。
 3. 附：`git submodule status` 输出、构建用的 cmake/flags、以及**当前二进制对应的 commit**（用于核对）。
@@ -144,7 +147,8 @@
 | GAP-03 | 2026-11-19 | 只读条件审计：把同事全部实验逐臂提取「客户端/target/master 节点、数据路径是否跨节点、参数与库」，标出同节点/条件不可比的数字 | 已关闭 | 归档结果中**没有** initiator=target 同节点的 8 MiB gap 对比（R5/R6/R11 均 node2→node4，R11 有 includes_same_host=False）；r7bi 系列 target 在 node2 且无测量输出，不可用；`0.4667 ms vs 259.92 µs` 因 strip 256 vs 128 + taskset/-s 不同**不可比**；R6 rand 655.6 vs 327.2 因随机范围 15.4× **不可比**；R6 seq 466.6 vs 245.7 仅差 taskset/-s；可用基线=Round6 框架内 Mooncake 各臂与 R6 SPDK 各臂自身 |
 | GAP-04 | 2026-11-19 | 新环境接入与只读侦察：node1/node3 连接与角色、硬件/盘/URMA、代码与二进制（含 V3 打点）、端口占用、工作集与容量 | 已关闭 | 两台可登录、不同物理机；文档角色 node1=initiator/client、node3=target/master；node3 的 `nvmf_tgt` 带完整 V3（md5 `e7440ae0…`），**node1 的 `urma_perf` 与我方 Mooncake 客户端均不带 V3**；盘各 11×7.68 TB；4457 空闲；node3 的 50056/8086/9006/50156 被**本方 23 h 遗留进程**占用；工作集=0；node3 大页 9.06 GB（iobuf 需 ~8.06 GB，余量小）；两台 liburma `5c021f7f…`（≠ node2/4） |
 | GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
-| GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 待执行 | — |
+| GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
+| GAP-07 | 2026-11-19 | 构建 + 首轮实测（可执行）：gap 内最新源码 + 仅 `urma_perf.c` 随机补丁 → 编译 SPDK/Mooncake → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -448,7 +452,9 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 ---
 
-# GAP-06（待执行 · 2026-11-19）· 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）
+# GAP-06（已关闭 · 2026-11-19）· 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）
+
+> 回执已收。三个关键事实：①补丁只存在于同事工作区；②**随机读只在 `urma_perf.c`**，p99 门控是旁路文件；③node1 无外网，后续源码/子模块必须经 Windows 中转。
 
 > 背景：最新 SPDK（`urma_enable_v2` tip `170cbb94…`）的 `urma_perf.c` 没有随机读；同事说他的目录里有补丁。用户要求从同事目录取回。
 > 约束：node2/node4 只读；所有落盘只在 node1 的 `~/gap`；**不启动任何服务、不 build、不跑流量**（本任务只做取补丁 + `git apply --check`）。
@@ -520,6 +526,21 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 - **0.8 master 与 keys（必读）**：本轮在 **node3** 起我方新 master（50056/8086/9006）；旧进程已停、无 snapshot → **500k keys 需本轮 prefill**。用户 2026-11-19 已接受 prefill 覆盖盘上旧数据。
 - **0.9 命令预写**：开始前把每臂的完整命令、env、预期输出文件写进 `meta.md`；执行中任何偏离 → 停手回报，不临场改参数。
 - **0.10 构建清单冻结**：记录本次构建的确切来源——SPDK repo/分支/commit、Mooncake repo/分支/commit、随机读补丁文件 + md5、构建命令/CMake flags/编译器版本、各产物 md5 与 `strings` 特征；写入 `~/gap/baseline/MANIFEST.md`。**这就是以后修改代码的基线。**
+
+## A. 构建（Stage A；失败即停，不进入实测）
+
+> 前置事实（GAP-06）：node1 无外网；SPDK 最新源码已由 Windows 侧中转放入 `~/gap/spdk`（`170cbb94…`）；补丁在 `~/gap/patches/colleague_spdk.diff`（md5 `b70aa91c…`）；`git apply --check -C1` 通过，默认上下文有 1 行失败（usage 里 `default: dmabuf` vs 最新 `default: cpu`）。
+
+- **A1 依赖预检**：node1/node3 上 `gcc --version`、`cmake --version`、`make --version`、`python3 --version`；DPDK（`/usr/local/lib/libdpdk*` 或 `pkg-config --modversion libdpdk`）、numa、isa-l；Mooncake 需要的 cmake/依赖。**缺什么列清单；能从 Windows 侧获取的走中转；不擅自装系统包。**
+- **A2 源码与子模块**：SPDK 子模块（dpdk/isa-l 等，如需）与 Mooncake 子模块（pybind11 等）在 Windows 侧 `--recurse-submodules` 拉齐，打包转入 gap；记录各 repo 与子模块 commit。**不得使用 gap 外的源码。**
+- **A3 打补丁**：在 `~/gap/spdk` 上**只应用 `urma_perf.c`**（用 `-C1` 或把补丁上下文改成最新 `default: cpu`）；应用后 `git diff --stat` 应只有 `examples/nvme/urma_perf/urma_perf.c`；保存"实际应用的补丁"与 md5。
+- **A4 编译**：
+  - node1：`./configure`（DPDK 路径按 A1）→ `make -j` → `build/examples/urma_perf`；`--help` 应出现 `--range-bytes` / `--lba-plan`；`strings` 应含 `SPDK_URMA_STAGE_READER_SINK` / `SPDK_URMA_STAGE_TRACE_US` / `URMA_SLOW_IO`。
+  - node3：同源编译 `build/bin/nvmf_tgt`；`strings` 应含 `SPDK_URMA_TARGET_DUMP_SEC` / `SPDK_URMA_STAGE_TARGET_SINK`。
+  - Mooncake：node1 构建 `stress_cluster_bench`（放 `~/gap/bench/`）；node3 构建 `mooncake_master` 与 `nof_register`。
+  - 记录：configure/CMake 参数、编译器版本、产物 md5、构建耗时。
+- **A5 冻结清单**：把 A2/A3/A4 的 commit、补丁 md5、构建参数、产物 md5 写入 `~/gap/baseline/MANIFEST.md`（即 §0.10）。
+- **Gate**：任一构建失败或缺依赖无法在 gap 内解决 → 停手回报，不进入 §1。**不要用旧二进制顶替。**
 
 ## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致；listener=4457）
 
@@ -616,4 +637,4 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 ## 回执必答的一句话（第一行）
 
-各臂是否全部完成；prefill 耗时；Mooncake 与 urma_perf 的 E2E、target `bdev`（W9）、`data`（C2H）三项的均值与 p99 差值；各自客户端账本口径（LEGACY vs V3）与样本量。
+构建是否全部成功（各产物 md5、补丁 md5、构建耗时）；各臂是否全部完成；prefill 耗时；Mooncake 与 urma_perf 的 E2E、target `bdev`（W9）、`data`（C2H）三项的均值与 p99 差值；各自客户端账本口径（LEGACY vs V3）与样本量。
