@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-15（32×256KB 对齐 + 每臂 120s 配对，可执行）**；master/target/注册保持运行；不重启 target
+- 当前任务：**GAP-16（增量补灌到 400k → 同窗口四臂 × 120s，可执行）**；master/target/注册保持运行；不重启 target
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -174,7 +174,8 @@
 | GAP-12 | 2026-11-19 | 单遍+`-verify=false`（实际执行 v1）：10k 探针定 N → A1/A2 Mooncake seq/rand 4t（单遍 N）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验 | 已完成 | **`verify=false` 让 Mooncake 6.70→26.12 GiB/s（3.9×）**；A1 26.12/1194.03µs/p99 1685.58、A2 26.46/1177.41/1659.20、A3 29.21/267.405/432.64、A4 16.72/467.079/727.04；全部 failed=0、**无一绕回**；target W9/TOTAL 为 per-child（Mooncake 64×128KB、urma 32×256KB）；A1/A2 各 508MB bench breakdown 日志；D12-1 trid 接受、D12-2 key0 被 urma preflight 覆写 |
 | GAP-13 | 2026-11-19 | 只读分析：A1/A2 的 bench 逐请求 breakdown 分解（query/master/transfer/其他）→ 找 breakdown 日志开关 → 查 chunk 128KB vs 256KB 的来源与对齐方法；修正 per-parent vs per-child 口径 | 已完成 | A1/A2 = 11.0% query RPC（131µs）+ 87.6% read（1047µs）+ 0.2% 其他 + 1.2% bench 包装；breakdown 由 `MC_HIFREQ_LOG_SAMPLE_RATE`（默认 1.0）门控；Mooncake 64×128KB 来自 `MC_NOF_SUBMIT_CHUNK_BYTES`；urma 32×256KB 来自 RAID0 NOIOB 256KB；**发现并发不匹配：A1/A2 4t vs A3/A4 -T1** |
 | GAP-14 | 2026-11-19 | 同并发（1 parent in flight）配对 A/B：探针 → A1'/A2' Mooncake 1t → A3'/A4' urma -T1（`SPDK_URMA_MAX_IO_SIZE=131072` 目标 64×128KB）→ chunk/绕回校验 | 已完成（3/4 臂） | A1' 110.35s/294k/20.81GiB/s/avg 375.01/p99 412.19（64×128KB）；A2' 200.16s/11.48GiB/s/avg 680.50/p99 884.86（64）；A3' **硬拒**（max_io 131072 与 -o 8MiB 互斥）；**越权**跑 A3p2 native 32×256KB：120s/457,307 IO/30.49GiB/s/avg 262.32/p99 427.52；A4' 未跑。关键：1 并发 seq 下 target TOTAL 对 chunk 不敏感（124 vs 122µs），Mooncake E2E 375 vs urma 262 → **+113µs**；rand target W9 272µs。**决定：不重启 -R128；改 Mooncake 262144 对齐 32×256KB** |
-| GAP-15 | 2026-11-19 | 32×256KB 对齐（Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`）：10s 1t 探针（120s 预估 ≤2.4663TB 否则停手）→ A1''/A2'' Mooncake seq/rand 1t（120s，seed 0/42）→ A3''复用 A3p2 → A4'' urma rand native（120s）→ child/父=32 硬门 + 绕回校验 | 待执行 | — |
+| GAP-15 | 2026-11-19 | 32×256KB 对齐（Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`）：10s 1t 探针（120s 预估 ≤2.4663TB 否则停手）→ A1''/A2'' Mooncake seq/rand 1t（120s，seed 0/42）→ A3''复用 A3p2 → A4'' urma rand native（120s）→ child/父=32 硬门 + 绕回校验 | 已中止（D15-1 停手门） | 10s 探针 21.58 GB/s（20.10 GiB/s）→ 120s 需 **2.5897 TB**（308,715 keys）> 现有 2.4719 TB（294,669 keys）；源码 `key_idx % total_keys`（`stress_cluster_bench.cpp:1534`）证实会循环回绕；最大不绕回 114.28 s（294k）。开发侧裁定 **③ 补数据**（不选 103/114 s），转 GAP-16 |
+| GAP-16 | 2026-11-19 | 补数据 + 同窗口四臂：源码核对增量前提 → 增量补灌到 **400,000 keys（3,355,443,200,000 B）** → 10s 探针（child/父=32、120s 预估 ≤3.3554TB）→ A1''/A3''/A2''/A4'' 各 120s（seed 0 / 0 / 42 / 42）→ 绕回校验 + 分析 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -1051,7 +1052,9 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 
 ---
 
-# GAP-15（待执行 · 2026-11-19 · 每臂 120s）· 32×256KB 对齐（Mooncake 262144）：探针 → A1''/A2'' → A4'' → 分析
+# GAP-15（已中止 · 2026-11-19）· 32×256KB 对齐（Mooncake 262144）：探针 → A1''/A2'' → A4'' → 分析
+
+> **状态：已中止（D15-1 停手门触发），由 GAP-16 取代。** 原因：10 s 探针 21.58 GB/s → 120 s 需 2.5897 TB，超出已有 2.4719 TB（294,669 keys）；`key_idx % total_keys` 证实会循环回绕。本节的 §1 未执行。
 
 > **开发侧决策**：**不重启 target、不改 `-R 128`**（会改变 RAID0 布局 → 现有 2.47TB 数据作废、需重新 prefill ~22min）；改走 **Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`**（纯 env）对齐到 urma 的 **32×256KB**。
 > **复用**：A3p2（urma seq native 32×256KB，120s）**采纳为 A3''**（457,307 IO / 30,487 MiB/s / avg 262.32 / p99 427.52 / 0 errors）；D14-1 的越权行为已记录，后续不得再有超授权动作。
@@ -1086,3 +1089,78 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 ## 回执必答（第一行）
 
 10 s 探针字节与 120s 预估是否 ≤2.4663TB；A1''/A2''/A4'' 是否都跑满 120 s；**child/父是否都=32**；queries/是否 WRAP；1 并发 32×256KB 下的 E2E 与 target。
+
+---
+
+# GAP-16（待执行 · 2026-11-19 · 每臂 120s）· 补数据 → 同窗口四臂：增量补灌 400k → 10s 探针 → A1''/A3''/A2''/A4''
+
+> **D16-1（回应 D15-1）**：在「每臂 120 s」+「不能绕回」两条硬规则下，开发侧选 **③ 补数据**；不选 103 s / 114 s（违反 120 s 硬规则）。
+> **D16-2 补灌是增量的，不重写已有 2.47 TB**：源码 @af253a2 核实——`put` 命中已存在 key 时 master 返回 `OBJECT_ALREADY_EXISTS`，客户端按**成功跳过、不落盘**（`client_service.cpp:2917-2920`，`return {};`）。写 400,000 keys 只会真正写 294,669..399,999 这 **105,331 个新 key（883.6 GB，约 8 min @1.9 GB/s）**。
+> **量的依据**：400,000 keys = **3,355,443,200,000 B**；实测 21.58 GB/s → 可读 **155.5 s**（+29.6% 余量）；速率 ≤ **27.96 GB/s** 就不绕回。
+> **D16-3 同窗口**：补灌完成后才跑四臂；GAP-15 原「复用 A3p2」**作废**（A3p2 是补灌前状态），A3'' 重跑。
+> 约束：不重启 target/master、不动 `-R`/`-S`/注册；不改代码/bench；gap-only（`~/gap/lib_sys`）；root。
+
+## 0. 预检（只读，≤3 min）
+
+- `~/gap/mooncake_src/src` 的 HEAD 与 `git status --porcelain`；
+  `grep -n "OBJECT_ALREADY_EXISTS" -A 3 ~/gap/mooncake_src/src/mooncake-store/src/client_service.cpp` → **必须出现 `return {};` 跳过分支**；不出现 → 停手回报（禁止全量重写 3.36 TB）。
+- `master_nof_allocated_bytes` 应为 `2,471,862,730,752`（294,669 keys）；记录实际值。
+- target 4457 在、dump 可用；`urma_perf` / `stress_cluster_bench` md5 与 GAP-07 一致；无 bench 残留进程。
+- `mkdir -p ~/gap/g16`；marker：`00_pre.ok` / `01_prefill.ok` / `02_probe.ok` / `10_A1pp.ok` / `11_A3pp.ok` / `12_A2pp.ok` / `13_A4pp.ok`；已存在的步骤跳过。
+
+## 1. 增量补灌到 400,000 keys（后台，≤30 min）
+
+- 命令（同 GAP-08 prefill，只改 key 数并加 `-verify=false -wait_seconds 0`）：
+
+  ```
+  sudo -n /usr/bin/stdbuf -oL -eL env LD_LIBRARY_PATH=~/gap/lib_sys SPDK_URMA_DEV_NAME=$DEV SPDK_URMA_CAPSULE_TRANSPORT=urma SPDK_URMA_MAX_IO_SIZE=8388608 ~/gap/bench/stress_cluster_bench -scenario segment_write -role writer -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 400000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912 -verify=false -wait_seconds 0
+  ```
+
+  日志 `~/gap/g16/prefill_400k.log`（nohup 后台，前台 tail）。
+- 预期：前 294,669 个逐 key 走一次 PutStart 后跳过（约 1–3 min），从 `Written 294670/400000` 起真实写入，约 8 min。
+- 门：
+  - `Write complete: 400000 succeeded, 0 failed`；**failed>0 → 停手回报，不跑臂**。
+  - `master_nof_allocated_bytes` = **3,355,443,200,000**（±1 key）；差 >1 key → 停手回报。
+  - 30 min 未完成、或 3 min 无进度 → `kill -TERM` 后停手回报（记录当时 allocated）。
+
+## 2. 10 s 探针（Mooncake seq 1t，262144）
+
+- 与 A1'' 相同 env/命令，只把 `-duration 120` 改 **10**；日志 `~/gap/g16/probe10.log`。
+- 门（硬）：
+  - target child/父 **必须 32**；
+  - `10 s 读取字节 × 12` ≤ **3,355,443,200,000**；超 → 停手回报（不硬跑）。
+  - 无 FINAL SUMMARY / failed>0 → 停手回报。
+
+## 3. 四臂（每臂 120 s；顺序固定；无 trace/V3）
+
+- 每臂：`sudo -n /usr/bin/stdbuf -oL -eL env ...`，日志 `~/gap/g16/<臂>.log`；每臂后 target dump（reset 口径同 GAP-14）并记 child/父。
+- **A1'' Mooncake seq 1t**（`-shuffle_seed 0`）：
+
+  ```
+  sudo -n /usr/bin/stdbuf -oL -eL env LD_LIBRARY_PATH=~/gap/lib_sys SPDK_URMA_DEV_NAME=$DEV SPDK_URMA_CAPSULE_TRANSPORT=urma SPDK_URMA_MAX_IO_SIZE=8388608 MC_NOF_SUBMIT_CHUNK_BYTES=262144 MC_HIFREQ_LOG_SAMPLE_RATE=0.01 ~/gap/bench/stress_cluster_bench -scenario segment_read -role reader -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 400000 -num_threads 1 -batch_size 1 -warmup_keys 64 -duration 120 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0 -verify=false
+  ```
+
+- **A3'' urma seq 1t**（native 32×256KB，无 `SPDK_URMA_MAX_IO_SIZE`）：
+
+  ```
+  sudo -n env LD_LIBRARY_PATH=~/gap/lib_sys SPDK_URMA_DEV_NAME=$DEV SPDK_URMA_CAPSULE_TRANSPORT=urma URMA_PERF_ADDR_MODE=seq ~/gap/spdk/build/examples/urma_perf -w read -o 8388608 -T 1 -b 1 -t 120 -n 1 -g 0 -l 0 -M cpu --range-bytes 5497558138880
+  ```
+
+- **A2'' Mooncake rand 1t**：同 A1''，`-shuffle_seed 42`。
+- **A4'' urma rand 1t**：同 A3''，`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`。
+- 硬门（每臂后）：
+  - child/父：四臂全部 **=32**；
+  - A1''/A2''：`queries × 8,388,608` ≤ **3,355,443,200,000**；
+  - A3''/A4''：总 IO 字节 ≤ **5,497,558,138,880**；
+  - 超 → `WRAP` 作废并停手；watchdog 240 s；无 FINAL SUMMARY → 停手回报。
+
+## 4. 分析 / 回执
+
+- 同口径表（1 并发、120 s、32×256KB、400k keys）：E2E 的 avg/P50/P90/P99/P999/max（µs，绝对值）；客户端分解（1% 采样：query/master/transfer）；target W9/push/TOTAL（per-child）；child/父。
+- 对比 A1'' vs A3''（seq）、A2'' vs A4''（rand），gap = 同口径 E2E 之差；**不跨 chunk/并发相减**。
+- 标注：400k keys（非 500k 口径）；四臂均在补灌后同一数据状态窗口；A3p2 仅作历史参考。
+- 不清理：master/target 保持运行。
+
+## 回执必答（第一行）
+
+补灌是否 `400000 succeeded, 0 failed` 且 allocated = 3,355,443,200,000；探针 child/父=32 与 120s 预估；**四臂是否都跑满 120 s、是否 WRAP、每臂 child/父是否都=32**；1 并发 32×256KB 下 seq/rand 的 E2E 与 target W9/TOTAL。
