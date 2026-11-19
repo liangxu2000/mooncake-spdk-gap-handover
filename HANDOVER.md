@@ -62,7 +62,7 @@
 | Mooncake client 侧 RPC | **50156** | 必须显式传（具体开关在任务预检里核实） |
 
 - **本轮机器（2026-11-19 用户定）：node1 / node3**。角色（连接文档声明，GAP-04 核实）：**node1 = initiator / client（有 GPU）**，**node3 = target / master（无 GPU）**；两台不同物理机，数据跨机。**必须保持 initiator ≠ target**（组长第 1 条要求）。
-- **独占状态（2026-11-19 用户宣布）**：node1/node3 现为本方独占。但**重启、target takeover/restore、停 master/client 等高风险操作必须先经用户当轮同意**，不得擅自执行。
+- **独占与高风险授权（2026-11-19 用户宣布）**：node1/node3 现为本方独占；**GAP-05 §0 的两个遗留进程停止、GAP-06 的 vfio 接管/还原与本方 target/master 启停，均已获用户当轮整体授权**。仍禁止：pkill/killall、reboot、rmmod udma、动他人进程；异常即停并回报；**授权范围之外的新类型高风险动作**仍需先问。
 - **启动前必须做端口占用检查**；任一端口被他人占用 → 停手回报，不得抢占、不得改回同事的端口。
 - 已核实的源码事实（供预检对照）：
   - master 三个端口都有显式 flag：`--rpc_port` / `--http_metadata_server_port` / `--metrics_port`（`mooncake-store/src/master.cpp:134/410/547`）。
@@ -354,7 +354,15 @@ GAP-06 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 
 # GAP-05（待执行 · 2026-11-19）· 工具补齐与可行性验证（只读 + 仅写 `~/gap`）
 
-> **约束**：gap 外只读；所有复制/解包/试运行都在 `~/gap`；**不启停任何服务、不连 target、不跑流量、不 takeover**。允许 `--help` / `-h` / `ldd` / `strings` 级验证。
+> **约束**：gap 外只读；所有复制/解包/试运行都在 `~/gap`；**除 §0 用户已授权的两个遗留进程外，不启停任何服务**；不连 target、不跑流量、不 takeover。允许 `--help` / `-h` / `ldd` / `strings` 级验证。
+
+## 0. 释放 node3 端口（用户已授权 · 2026-11-19）
+
+- 目标进程：**PID 1184018**（master，cwd `~/nds/e3bd/mooncake_master_runtime`）与 **PID 1243055**（client，cwd `~/nds/e3bd/mooncake_client_runtime`）。
+- 停前核对三重证据：cmdline、cwd、监听端口 —— 确认仍是本方遗留进程，且工作集为 0。
+- 按 PID：`kill -TERM` → 等 10 s → 仍在则 `kill -KILL`；**禁 pkill/killall**。**不动 2879174（他人 client）**。
+- 验证 50056 / 8086 / 9006 / 50156 全部释放；给 `ps`/`ss` 前后对比（≤10 行）。
+- 若 PID 不存在或核对不符 → 停手回报，不扩大范围。
 > 背景：GAP-04 发现两个硬缺口——①node1 没有我方 Mooncake 客户端；②node1 没有带 V3/慢 IO 的 initiator（`urma_perf`）。本任务用"复制可用二进制进 `~/gap` 再试运行"的方式补齐/验证，**不重编、不改代码**。
 > 回执不要贴二进制/源码；只给路径、md5、`--help` 关键行（≤10 行）。
 
@@ -387,7 +395,7 @@ GAP-06 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 
 ## 回执必答（第一行）
 
-node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`（`--help` 级）；50156 的实际开关；node3 大页是否够 iobuf。
+node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`（`--help` 级）；50156 的实际开关；node3 大页是否够 iobuf；node3 四个端口是否已释放。
 
 ---
 
@@ -395,7 +403,7 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 > **硬门：只有用户在本轮对话中明确宣布"独占"（例如"现在可以独占/佛挡杀佛"）才允许执行 §1 及之后的所有步骤。若未明确宣布：只做 §0 只读预检，然后停手回报；不得启动 target、不得停任何进程。**
 > 目标：把 ~200 µs（同口径 222 µs）差距定位到具体层/段。**本轮不改代码、不重编、不优化。**
-> 预计占机 60–90 min（含我方 master 启动与 prefill）。机器：**node1 = initiator/client，node3 = target/master（已确认）**；两台不同物理机，数据跨机。**高风险操作（停遗留进程、target takeover/restore、启停 master）必须先经用户当轮同意。**
+> 预计占机 60–90 min（含我方 master 启动与 prefill）。机器：**node1 = initiator/client，node3 = target/master（已确认）**；两台不同物理机，数据跨机。**高风险操作已获用户 2026-11-19 整体授权**（停资源占用者、vfio 接管/还原、启停本方 target/master）；必须按 PID、禁 pkill/killall、不 reboot、不 rmmod udma、不动他人进程；异常即停并回报。
 > **定稿前置（GAP-05 回执）：①node1 上可用的 Mooncake 客户端与带 V3 的 urma_perf；②50156 的实际开关；③node3 大页是否够 iobuf；④node3 的端口处置方案（用户确认）。**
 > **GAP-03 审计结论（2026-11-19）**：历史 `0.4667 ms vs 259.92 µs` 因 strip 256/128 与 taskset/-s 不同，**不构成同参数对照**；R6 rand `655.6 vs 327.2` 因随机范围 15.4× **不可比**；R6 seq `466.6 vs 245.7` 仅差 taskset/-s。**本轮必须由我方在同一窗口重测两侧基线**；历史数字只作漂移参考（R6 MC seq_a vs seq_b 的 p99 漂移 0.0073 ms 可作噪声标尺）。
 
