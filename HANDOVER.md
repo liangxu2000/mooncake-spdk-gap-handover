@@ -157,7 +157,7 @@
 | GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
 | GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
 | GAP-07 | 2026-11-19 | 构建 + target 启动（原大任务，后续已拆分） | 已关闭（阶段性） | 6/6 产物构建成功：`urma_perf` `c653c0a6…`、`stress_cluster_bench` `f5425d77…`、`nvmf_tgt` `6668b490…`、`mooncake_master` `ec8ef785…`、`nof_register` `bfe476ea…`；补丁只含 `urma_perf.c`（patch `eea4ca39…`，应用后 `614b008c…`）；target 已在 `4457` 起来（RAID0/strip 256/11 盘，timing dump 正常）；§1b 起未执行 |
-| GAP-08 | 2026-11-19 | **无人值守连跑（用户明确要求）**：master → NoF 注册 → prefill 3.81TiB → 核心 4 臂 → 次要 2 臂 → 分析 → 收尾；带 marker 断点续跑、逐步落盘、硬阻塞即停 | 待执行 | — |
+| GAP-08 | 2026-11-19 | **无人值守连跑（用户明确要求）**：master → NoF 注册 → prefill 3.81TiB → 核心 4 臂 → 次要 2 臂 → 分析 → 收尾；带 marker 断点续跑、逐步落盘、硬阻塞即停 | 执行中（阻塞修复） | §2 master 成功（50056/8086/9006，PID 3280372）；§3 注册成功（5 TiB，trsvcid:4457）；§4 prefill 硬阻塞：bench 构建 `USE_UB=OFF` → `Unsupported transport ub`。**已授权 §3b 加 `-DUSE_UB=ON` 重建 bench 后从 §4 继续**；D1（补 `enable_http_metadata_server=true`）、D2（root 运行）已接受；target/master 保持运行 |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -681,7 +681,8 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 ## 2. 起 master（验收后写 master.ok）
 
 - 命令（逐字）：
-  `~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master --rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006 --nof_heartbeat_interval_sec=120 --nof_heartbeat_failures_threshold=5`
+  `~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master --rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006 --enable_http_metadata_server=true --nof_heartbeat_interval_sec=120 --nof_heartbeat_failures_threshold=5`
+  （**已接受偏差 D1**：原任务书漏了 `--enable_http_metadata_server=true`，导致 8086 不监听；补上后验收通过。已运行的 master 无需重启。）
 - `LD_LIBRARY_PATH` 用构建记录/MANIFEST 中的 gap 内路径；`ldd` 无 not found（系统库除外）；记录。
 - 日志 `~/gap/results/GAP-08/logs/mooncake_master.log`；PID 写同目录 `mooncake_master.pid`。
 - 验收：50056/8086/9006 LISTEN；`curl -s 127.0.0.1:9006/metrics | grep master_nof_allocated_bytes` 可读（预期 0）。
@@ -694,16 +695,31 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
   （nqn、nsid、traddr、trsvcid、trtype、master、size=5 TiB；失败则停并原样回报错误）
 - 验收：metrics `nof_segment_total_capacity_bytes{... trsvcid:4457 ...}` > 0；记录原值。
 
+## 3b. 重建 bench（用户已授权 · 2026-11-19）
+
+- **原因**：Stage A 构建时 `USE_UB=OFF`，bench 不支持 `-protocol ub`（URMA/UB 传输未编译，`multi_transport.cpp:505 Unsupported transport ub`）。
+- 在同一源码、同一 build 目录上追加 `-DUSE_UB=ON`（保留 `-DUSE_NOF=ON`、`-DUSE_NOF_URMA=ON` 及其它现有 cache 值）：
+  ```
+  cmake -S ~/gap/mooncake_src/src -B ~/gap/mooncake_src/mc_g7/build -DUSE_UB=ON
+  cmake --build ~/gap/mooncake_src/mc_g7/build --target stress_cluster_bench -j
+  ```
+  （build 目录按实际路径；记录完整命令与 CMakeCache 的 `USE_UB/USE_NOF/USE_NOF_URMA/USE_CUDA/USE_NOF_GPU_DIRECT`）
+- 验收：新产物 md5、`--help` 正常、`-protocol ub` 不再报 Unsupported；把新 flags 与 md5 写入 `MANIFEST.md`。
+- **只重建 node1 的 bench**；master / target / nof_register 不动。
+
 ## 4. prefill（验收后写 prefill.ok；上限 30 min）
 
-- 命令（逐字，env 见下）：
-  `~/gap/bench/stress_cluster_bench -scenario segment_write -role writer -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912`
+- **运行身份（已接受偏差 D2）**：所有 initiator 侧进程（bench / urma_perf）用 `sudo -n` 以 root 运行（非 root 时 DPDK 因 IOVA=PA 初始化失败，已实测）；环境变量用 `sudo -n env VAR=...` 显式传递；记录最终命令。
+
+- 命令（逐字，env 见下；**root 执行**）：
+  `sudo -n env LD_LIBRARY_PATH=<gap 内构建库路径> SPDK_URMA_DEV_NAME=$DEV SPDK_URMA_CAPSULE_TRANSPORT=urma SPDK_URMA_MAX_IO_SIZE=8388608 ~/gap/bench/stress_cluster_bench -scenario segment_write -role writer -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912`
 - env：`LD_LIBRARY_PATH` 按 §2；`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`。若 `-global_segment_size 0` setup 失败 → 回落 4 GB 并记录。
 - 日志 `.../logs/prefill.log`；记录开始/结束、写入量、失败数。
 - 验收：`master_nof_allocated_bytes` ≈ 4,194,304,000,000（记录实际值）；超时/失败 → BLOCKED。
 
 ## 5. 测量臂（每臂 60 s；完成一臂立即落盘+marker，再跑下一臂）
 
+- **所有臂命令均以 `sudo -n env <下列 env> ` 前缀执行（root，见 D2）**；记录最终命令。
 - Mooncake 公共 env：`LD_LIBRARY_PATH`（§2）、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、`SPDK_URMA_STAGE_TRACE_US=500`、`SPDK_URMA_TRACE=1`。
 - urma_perf 公共 env：`LD_LIBRARY_PATH=~/gap/lib:~/gap/spdk/build/lib`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_STAGE_TRACE_US=1`、`SPDK_URMA_STAGE_READER_SINK=buffer`、`SPDK_URMA_STAGE_READER_PATH=~/gap/results/GAP-08/<arm>.v3`、`SPDK_URMA_STAGE_READER_CAPACITY=12000000`。
 - A1 Mooncake seq 4t：`~/gap/bench/stress_cluster_bench -scenario segment_read -role reader -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0`
