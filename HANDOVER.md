@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-12（关 verify + 单遍读：10k 探针 → 4 臂，可执行）**；master/target/注册保持运行；GAP-08～11 已中止
+- 当前任务：**GAP-13（只读分析：修正口径 + 客户端分解 + 日志开关 + chunk 对齐）**；master/target/注册保持运行；GAP-08～11 已中止
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -171,7 +171,8 @@
 | GAP-09 | 2026-11-19 | 120 秒/臂、300k × 8MiB（≈2.29 TiB）快速实验：停 prefill → 10s 读检查（失败则补灌）→ 核心 4 臂（120s）→ 分析；裸 SPDK 读完整 5 TiB 池 → 两臂均不绕回；标注"非 500k 口径、范围差异" | 已中止（方法错误，无有效臂） | prefill 停于 294,669 keys（2.4718 TB）；10s 检查误判 duration 语义 + `SPDK_URMA_TRACE=1` 导致 9min/468MB；后又擅自补灌（已停）。源码核实：**write 单线程顺序 → 294,669 keys 是连续前缀**；**read 支持 -duration**。现场未破坏 |
 | GAP-10 | 2026-11-19 | 用现有 294k keys 跑 4 臂：20s duration 探针 → A1/A2 Mooncake seq/rand 4t（120s，seed 0/42，去 SPDK_URMA_TRACE）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；不补灌、不动 master/target | 已中止（仅探针） | NUM_KEYS=294,000；探针测量段 20.02 s、failed=0，但 `STAGE_TRACE_US=500` 产生 119,208 行/139 MB、速率 6.71 GiB/s、收尾 49 s；按 60 s 门限停；A1–A4 未跑。**打点污染主测量 → 主臂去客户端打点** |
 | GAP-11 | 2026-11-19 | 清洁 4 臂：10s 无打点探针（确认速率）→ A1/A2 Mooncake seq/rand 4t（120s，seed 0/42）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；两侧均无 client trace，target `-s 10` 为共同口径 | 已中止（仅探针） | 无打点探针仍 **6.70 GiB/s**（打点不是瓶颈）；`-duration` 结束后续读 190s、无 FINAL SUMMARY。源码核实：`ValidateMeasuredRead` 受 `-verify` 门控（默认 true）→ 每 8MiB 读多一次 8MiB 比较（计时区间外），是 ~3.86ms/op 的最可能原因；duration 的 join 在循环后，worker 卡住则不返回。**改单遍 + verify=false** |
-| GAP-12 | 2026-11-19 | duration 120s + `-verify=false` + `stdbuf`：10s 探针（验证 FINAL 落盘与清洁速率，预估 120s 读量须 ≤2.4663TB）→ A1/A2 Mooncake seq/rand 4t（120s，seed 0/42）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；不改代码/bench | 待执行 | — |
+| GAP-12 | 2026-11-19 | 单遍+`-verify=false`（实际执行 v1）：10k 探针定 N → A1/A2 Mooncake seq/rand 4t（单遍 N）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验 | 已完成 | **`verify=false` 让 Mooncake 6.70→26.12 GiB/s（3.9×）**；A1 26.12/1194.03µs/p99 1685.58、A2 26.46/1177.41/1659.20、A3 29.21/267.405/432.64、A4 16.72/467.079/727.04；全部 failed=0、**无一绕回**；target W9/TOTAL 为 per-child（Mooncake 64×128KB、urma 32×256KB）；A1/A2 各 508MB bench breakdown 日志；D12-1 trid 接受、D12-2 key0 被 urma preflight 覆写 |
+| GAP-13 | 2026-11-19 | 只读分析：A1/A2 的 bench 逐请求 breakdown 分解（query/master/transfer/其他）→ 找 breakdown 日志开关 → 查 chunk 128KB vs 256KB 的来源与对齐方法；修正 per-parent vs per-child 口径 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -920,7 +921,12 @@ Mooncake 臂 env：`LD_LIBRARY_PATH`（gap 构建库）、`SPDK_URMA_DEV_NAME=$D
 
 ---
 
-# GAP-12（待执行 · 2026-11-19 · 修订 v2）· duration 120s + verify=false + stdbuf：10s 探针 → 4 臂
+# GAP-12（已完成 · 2026-11-19 · 实际执行的是 v1 单遍+verify=false）· 4 臂
+
+> **回执要点**：`-verify=false` 把 Mooncake 从 6.70 提升到 **26.12 GiB/s**；A1–A4 全部完成、failed=0、**无一绕回**；target 侧 Mooncake 为 64×128KB/请求、urma_perf 为 32×256KB/请求（口径不同，见 GAP-13）。
+> **三个必须先修正的口径问题**：① `E2E − target` 是“per-parent 减 per-child”，**单位不匹配、不能用**；② Mooncake bench 默认输出逐请求 breakdown，A1/A2 各 **508MB** 日志，可能抬高 E2E；③ Mooncake 臂 76s vs urma 120s、chunk 128KB vs 256KB，均非同一口径。
+> **D12-1（trid）**：接受测试侧按 target 实际 endpoint 补的 `-r` 参数（A3/A4 有效）。
+> **D12-2（key0 被覆写）**：接受；后续性能臂一律 `verify=false`；若要做带 verify 的臂，先重新 prefill/修复 key 0。
 
 > **根因（外部复核 + 源码结构一致）**：duration 的"不退出"**不是 join 死锁**，而是 **`VerifySegments` 在测量结束后把 294k 个 8MiB key 全量串行重读**（≈2.35 TiB，按 800µs/op ≈235s）；**FINAL SUMMARY 在验证之前打印**，但 stdout 块缓冲 + SIGTERM 导致文件里看不到。`-verify` 默认 true（且每 op 还多一次 8MiB 比较）。
 > **修复**：`-verify=false` 去掉全量验证和每 op 比较；`stdbuf -oL -eL` 保证 FINAL 落盘；**`-duration` 计时本身是准的，不需要单遍校准**。
@@ -957,3 +963,37 @@ Mooncake 臂 env：`LD_LIBRARY_PATH`（gap 构建库）、`SPDK_URMA_DEV_NAME=$D
 ## 回执必答（第一行）
 
 10 s 探针是否 ~10–30 s 退出并打印 FINAL SUMMARY（queries/failed/throughput/avg/p50/p99/墙钟）；120 s 预估读量是否 ≤ 2.4663 TB；A1–A4 是否完成；**每臂 queries/耗时/是否 WRAP**；E2E 与 target W9/C2H 关键值。
+
+---
+
+# GAP-13（待执行 · 2026-11-19）· 只读分析：修正口径 + 客户端分解 + 日志开关 + chunk 对齐
+
+> **目的**：把 GAP-12 的 4 臂数据变成可用结论。**不跑压测、不动 master/target/盘**；只读 node1 的 A1/A2 日志、源码与 `--help`。
+> **背景**：A1/A2 各 ~508MB 日志（bench 自带 per-request breakdown）；target 的 W9/TOTAL 是 **per-child**（Mooncake 64×128KB，urma_perf 32×256KB）→ `E2E − target` 不成立。
+
+## 1. 客户端分解（A1/A2，最关键）
+
+- 在 A1/A2 日志中找到 4 类逐请求行：`get_into_breakdown`、`query_rpc_breakdown`、`master_rpc_client_breakdown`、`transfer_data_breakdown`；先给出实际行格式与字段（≤10 行样例）。
+- 用 awk 对每类字段汇总：count、avg、p50、p90、p99（µs）；只统计成功的 8MiB READ。
+- 给表：A1、A2 各自的 E2E（1194.03 / 1177.41 µs）分解为 query RPC / master RPC / transfer data / 其他；对不上的写 `[未获取]`，不硬凑。
+- **明确口径**：这是 **per-parent** 数据，可与 E2E 比；target 的 per-child 不可直接相减。
+
+## 2. 日志开关（是否抬高 E2E）
+
+- 从源码/`--help` 找控制上述 breakdown 的 flag（如 `-verbose`/`-log_level`/`-breakdown`）；给关闭方法（`文件:行号` + 参数名）。
+- 若无开关：报告"只能重定向 `/dev/null`，格式化开销仍在"，并给出 508MB / 76s ≈ 6.7MB/s 的日志 I/O 事实（不下结论）。
+
+## 3. chunk 大小对齐（128KB vs 256KB）
+
+- 在 `urma_perf.c` 与 target 源码里找控制 8MiB 拆分（`max_children`/child size）的参数；解释 Mooncake 64×128KB、urma_perf 32×256KB 的来源。
+- 给出把 urma_perf 配成 **64×128KB** 的方法（参数/源码位置）；若不能，写 `[未获取]` 与原因。
+- 只查，不跑。
+
+## 4. 结论（事实层）
+
+- 一张修正表：A1/A2 客户端分解；A3/A4 的 E2E 与 per-child target；明确哪些数字可用、哪些不可。
+- 不改 master/target；不清理。
+
+## 回执必答（第一行）
+
+A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开关；urma_perf 能否配成 64×128KB。
