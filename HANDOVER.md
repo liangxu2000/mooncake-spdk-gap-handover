@@ -63,11 +63,14 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 | 编号 | 日期 | 内容 | 状态 | 回执摘要 |
 | --- | --- | --- | --- | --- |
-| R7-01 | 2026-11-19 | 只读情报：Round7 设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 本地 Round5 诊断文件 / 源码版本与二进制归属） | 待执行 | — |
+| R7-01 | 2026-11-19 | 只读情报：Round7 设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 本地 Round5 诊断文件 / 源码版本与二进制归属） | 已关闭 | 同一 `nvmf_tgt`（md5 `95ce0bfd…`）；两路 target 参数 4 处不同（`-s`/taskset/`-L`/`-I`）；master 心跳实际关闭（3600s×999999），500k keys 元数据仍在（4.19 TB，精确 500000×8 MiB）；Round6 无 prefill；客户端仅阈值采样/≤8192 行 CSV；裸 SPDK=`urma_perf -T1 -b1`、rand 覆盖全 namespace；H 节未答（并入 R7-02） |
+| R7-02 | 2026-11-19 | 只读：补 H 节（源码/二进制归属 + 2 个未提交文件 diff）+ 打点能力核对（target 聚合 / LEGACY / stage buffer 在三个二进制中是否可用）+ Round7 参数匹配事实（`-I` 实际值、两条 `-L` 库 md5、taskset、ns 容量、最近启动命令行） | 待执行 | — |
 
 ---
 
-# R7-01（待执行）· 只读情报收集：Round7 设计前置
+# R7-01（已关闭 · 2026-11-19）· 只读情报收集：Round7 设计前置
+
+> 回执已收（见任务历史摘要）。H 节未答，并入 R7-02。
 
 > **性质：纯只读**。不改任何文件、不启停任何进程、不碰盘/vfio、不重启。不需要独占窗口。
 > 若某个问项必须写操作才能取证：跳过，在回执里记 `[未获取] 需要写操作`。
@@ -156,3 +159,45 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 ## 回执必答的一句话（放在回执第一行）
 
 Round7 能否在 ①不重做 prefill ②两套测试同 target 二进制同参数 ③两端都开阶段计时 这三个前提下开跑；不能的部分，缺什么。
+
+---
+
+# R7-02（待执行 · 2026-11-19）· 只读：补 H 节 + Round7 实验前置核对
+
+> **纯只读**：不启动/停止任何进程、不碰盘/vfio、不跑压测、不修改文件（`/tmp` 探针脚本用完即删）。
+> 你 R7-01 的回执 A–G 已收到；本任务补齐未答的 H 节，并加 I/J 两节，为 R7-03（需用户独占窗口的实测）定参数与账本方案。
+> 目的只有三个：①确认机器代码/二进制与公开 commit 的差异；②确认三套打点在三个被测二进制里各自是否可用；③拿到参数匹配所需的事实。
+> 机器：node2、node4（共用机、非独占，红线同《协作约定》§6）。
+
+## H. 源码版本与二进制归属（若 R7-01 已做过，直接复用结果）
+
+- **H1** node2 / node4 上 SPDK 源码树位置；每棵树的 `git rev-parse HEAD`、`git status --porcelain`、`git remote -v`、`git branch --show-current`（或 `git describe --all`）。确认是否为 `e12b7cb21` / `urma_enable_v2`，两节点是否同一棵树。
+- **H2** 两个未提交修改文件：`examples/nvme/urma_perf/urma_perf.c`、`include/spdk_internal/trace_defs.h` 的 `git diff --stat` + 完整 diff（≤200 行；超长给 hunk 标题 + 关键 hunk）+ 两文件 `md5sum`。
+- **H3** 二进制归属：`nvmf_tgt`、`urma_perf` 的路径 + `md5sum` + `ls -l` 时间；用构建目录 .o/ninja 时间或 strings 特征判断它们是否由 H1 这棵树 + H2 的修改编出（不重编）。
+- **H4** Mooncake 源码树（node2 的 `mooncake-930`）：`git rev-parse HEAD`、`git status --porcelain`、`git remote -v`；是否也有未提交修改（若有，同 H2 给 diff）。
+- **H5** 部署文档一致性：`docs/yin/mooncake_nof_deployment.md` 记录的是旧配对（`urma_modified_v6` + `nof-urma-v2`）；只列出该文档中**仍在使用、但可能与当前代码不符**的启动参数或 env（≤10 条，给文档行号），不贴全文。
+
+## I. 打点能力核对（决定 R7-03 用哪套客户端账本）
+
+- **I1** `nvmf_tgt` 二进制 strings 检查：`URMA3B01`、`SPDK_URMA_STAGE_TARGET_SINK`、`SPDK_URMA_TARGET_DUMP_SEC` 是否出现（各给 是/否 + 1 行样例）。
+- **I2** `urma_perf` 二进制 strings 检查：`URMA3B01`、`SPDK_URMA_STAGE_READER_SINK`、`SPDK_URMA_STAGE_TRACE_US`。
+- **I3** Mooncake 客户端实际链接的 SPDK：`ldd` 解析出的库路径 + md5；对这些库做与 I2 相同的 strings 检查。若客户端是多进程（client/master），指明哪一个进程负责 NoF 读写。
+- **I4** 汇总一张表：三套通道（target 聚合 dump / LEGACY `URMA_SLOW_IO` 慢 IO / stage buffer V3）在 **nvmf_tgt、urma_perf、Mooncake 客户端** 三处各自可用与否。只给事实，不给建议。
+
+## J. Round7 参数匹配所需事实（只读）
+
+- **J1** Mooncake target 启动的实际 `-I` 值：从 `start_mooncake.py` 的 `select_nvme_devices` 逻辑推导（给公式与变量来源），或从 Round6 target 启动日志/命令行快照里找实际值；给 `文件:行号`。
+- **J2** 两条 `-L` 库目录（Mooncake 侧 `/home/tong/umdk_gpu_isolated/lib`、裸 SPDK 侧 `/home/yin/gdr/UMDK_netlab/lib`）的文件清单：`liburma*.so*`、`liburma_common*` 的 `ls -l` + `md5sum`；判断是否同一构建。
+- **J3** bare SPDK 侧 `run_exp.sh` 是否支持/方便加 taskset（给位置与用法）；Mooncake 侧 `taskset -c 2-7` 与 `-m 0xfc` 的对应关系（`文件:行号`）。
+- **J4** namespace 容量（bytes）：从 target 启动日志、RPC 输出或盘容量任一处给出，用于换算 `urma_perf` rand 的实际 LBA 范围。
+- **J5** 最近一次 Mooncake target 的完整启动命令行原文（≤6 行）与拉起时间，确认 `-s 10`、`-I`、`-L`、taskset 的实际组合。
+
+## 约束
+
+- 共用机、非独占：不触碰任何非本方进程；不重启 master/target；不走 takeover/restore；不装卸驱动（《协作约定》§6）。
+- 纯只读；非交互 `sudo -n`；不跑压测、不 prefill。
+- 回执按《协作约定》§5 五段格式；逐条编号回答 H1–J5，只给事实与依据。
+
+## 回执必答的一句话（放在回执第一行）
+
+三套打点在三个被测二进制里各自是否可用；`-L` 两条库是否同一构建；Mooncake target 的 `-I` 实际值是多少。
