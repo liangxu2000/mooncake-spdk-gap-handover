@@ -157,7 +157,7 @@
 | GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
 | GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
 | GAP-07 | 2026-11-19 | 构建 + target 启动（原大任务，后续已拆分） | 已关闭（阶段性） | 6/6 产物构建成功：`urma_perf` `c653c0a6…`、`stress_cluster_bench` `f5425d77…`、`nvmf_tgt` `6668b490…`、`mooncake_master` `ec8ef785…`、`nof_register` `bfe476ea…`；补丁只含 `urma_perf.c`（patch `eea4ca39…`，应用后 `614b008c…`）；target 已在 `4457` 起来（RAID0/strip 256/11 盘，timing dump 正常）；§1b 起未执行 |
-| GAP-08 | 2026-11-19 | 只起我方 master（node3，50056/8086/9006）并验收；不注册、不 prefill、不跑臂 | 待执行 | — |
+| GAP-08 | 2026-11-19 | **无人值守连跑（用户明确要求）**：master → NoF 注册 → prefill 3.81TiB → 核心 4 臂 → 次要 2 臂 → 分析 → 收尾；带 marker 断点续跑、逐步落盘、硬阻塞即停 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -654,32 +654,80 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 ---
 
-# GAP-08（待执行 · 2026-11-19）· 只起我方 master 并验收（不注册、不 prefill、不跑臂）
+# GAP-08（待执行 · 2026-11-19）· 无人值守连跑：master → 注册 → prefill → 核心 4 臂 → 次要 2 臂 → 收尾
 
-> **一单一阶段**：本任务只做"启动 master + 验收端口/日志"。**不碰 target、不注册 NoF、不 prefill、不跑任何臂。**
-> 前置状态（GAP-07 结束态）：target 仍在 node3 的 4457 运行（PID 3243095），**保持不动**；构建产物均在 `~/gap`；node3 大页已上调。
-> 机器：node3（master 与 target 同机；initiator 在 node1）。
+> **本次为用户明确要求的无人值守连跑（"一单一阶段"的例外）**：按固定顺序自动执行，**每步完成立即落盘、写进度、写 marker**；不等待用户输入。
+> **最重要数据先跑**：master → 注册 → prefill → 核心 4 臂（Mooncake seq/rand 4t、urma_perf seq/rand）→ 次要 2 臂（Mooncake 1t）→ 可选第 7 臂。
+> 机器：node1（initiator）/ node3（target/master）；target 当前在 4457 运行（PID 3243095），**不得重启**。
+> 约束：只用 `~/gap` 内产物；gap 外只读；按 PID 停进程（禁 pkill/killall）；不 reboot、不 rmmod udma；`-r` 还盘必须带 `-y`。
+> **硬阻塞**（target 消失/端口丢失/master 起不来/注册失败/prefill 失败）→ 写 `BLOCKED.md` 并停；**不改参数、不换二进制、不重启 target**。
 
-## 1. 启动（只执行这一条链路）
+## 0. 前置检查（只读）
 
-- 用 gap 内已构建的 master：`~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master`
-- 先 `ldd` 该二进制确认依赖；`LD_LIBRARY_PATH` 只指向 gap 内构建产物（系统库除外）；记录 ldd 与所用 `LD_LIBRARY_PATH`。
-- 启动命令（参数逐字照抄，未经开发侧同意不得改）：
+- target：`ss -ltnp | grep :4457`；`cat ~/gap/run/nvmf_tgt.pid`；`tail -5 ~/gap/logs/nvmf_tgt.log`（应有 timing dump）。
+- 端口：50056/8086/9006 空闲（若已被我方 master 占用，进入幂等分支）。
+- 资源：`free -g`；`df -h ~/gap`（≥10 GB）。
+- **设备名**：`sudo -n tr '\0' '\n' < /proc/3243095/environ | grep SPDK_URMA_DEV_NAME` → 记 `DEV`；取不到 → BLOCKED。
+- **NQN**：`python3 ~/gap/spdk/scripts/rpc.py -s ~/gap/run/spdk.sock nvmf_get_subsystems`，解析第一项 `subnqn` → 记 `NQN`；失败 → BLOCKED。
+- 结果目录：`~/gap/results/GAP-08/{logs,markers}`；初始化 `PROGRESS.md`。
+
+## 1. 幂等与断点
+
+- marker：`~/gap/results/GAP-08/markers/<step>.ok`（master / register / prefill / arm_A1..A7 / analyze / cleanup）。
+- 有 marker 且验收仍成立 → 跳过；marker 在但验收不成立 → 删 marker 按未完成处理，PROGRESS 记录。
+- 每步完成：`PROGRESS.md` 追加一行（时间、步骤、关键数值、产物路径+md5），再写 marker。
+- 单臂失败：重试 1 次；仍失败 → 记 `FAILED` 并继续下一臂（不阻塞）。
+
+## 2. 起 master（验收后写 master.ok）
+
+- 命令（逐字）：
   `~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master --rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006 --nof_heartbeat_interval_sec=120 --nof_heartbeat_failures_threshold=5`
-- 日志：`~/gap/logs/mooncake_master.log`；PID 写 `~/gap/run/mooncake_master.pid`。
+- `LD_LIBRARY_PATH` 用构建记录/MANIFEST 中的 gap 内路径；`ldd` 无 not found（系统库除外）；记录。
+- 日志 `~/gap/results/GAP-08/logs/mooncake_master.log`；PID 写同目录 `mooncake_master.pid`。
+- 验收：50056/8086/9006 LISTEN；`curl -s 127.0.0.1:9006/metrics | grep master_nof_allocated_bytes` 可读（预期 0）。
 
-## 2. 验收（逐条）
+## 3. 注册 NoF 段（验收后写 register.ok）
 
-- `ss -ltnp | grep -E ':(50056|8086|9006)\b'` → 三个端口都在 LISTEN，PID 与 pidfile 一致。
-- `curl -s http://127.0.0.1:9006/metrics | grep -E 'master_nof_allocated_bytes|master_total_nof_capacity_bytes'` → 能读到指标，记录值（预期工作集 0）。
-- 日志无启动报错（`grep -i error` 前 10 行）。
-- 记录：完整命令行、PID、启动时间、三个端口、日志路径、ldd 结果。
+- 看列表：`~/gap/mooncake_src/src/build/mooncake-store/src/nof_unregister 141.61.84.149:50056 --list`
+- 若有 `trsvcid:4457` 且容量 0 的旧记录：`nof_unregister 141.61.84.149:50056 4457`（只删匹配 4457 的项）。
+- 注册：`~/gap/mooncake_src/src/build/mooncake-store/src/nof_register "$NQN" 1 141.61.84.149 4457 URMA 141.61.84.149:50056 5497558138880`
+  （nqn、nsid、traddr、trsvcid、trtype、master、size=5 TiB；失败则停并原样回报错误）
+- 验收：metrics `nof_segment_total_capacity_bytes{... trsvcid:4457 ...}` > 0；记录原值。
 
-## 3. 停止点
+## 4. prefill（验收后写 prefill.ok；上限 30 min）
 
-- 到验收即停，**不做注册/不 prefill**；回报上述事实。
-- 若端口被占、启动失败、或 ldd 缺库 → 停手回报，不自行改端口/参数。
+- 命令（逐字，env 见下）：
+  `~/gap/bench/stress_cluster_bench -scenario segment_write -role writer -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912`
+- env：`LD_LIBRARY_PATH` 按 §2；`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`。若 `-global_segment_size 0` setup 失败 → 回落 4 GB 并记录。
+- 日志 `.../logs/prefill.log`；记录开始/结束、写入量、失败数。
+- 验收：`master_nof_allocated_bytes` ≈ 4,194,304,000,000（记录实际值）；超时/失败 → BLOCKED。
+
+## 5. 测量臂（每臂 60 s；完成一臂立即落盘+marker，再跑下一臂）
+
+- Mooncake 公共 env：`LD_LIBRARY_PATH`（§2）、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、`SPDK_URMA_STAGE_TRACE_US=500`、`SPDK_URMA_TRACE=1`。
+- urma_perf 公共 env：`LD_LIBRARY_PATH=~/gap/lib:~/gap/spdk/build/lib`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_STAGE_TRACE_US=1`、`SPDK_URMA_STAGE_READER_SINK=buffer`、`SPDK_URMA_STAGE_READER_PATH=~/gap/results/GAP-08/<arm>.v3`、`SPDK_URMA_STAGE_READER_CAPACITY=12000000`。
+- A1 Mooncake seq 4t：`~/gap/bench/stress_cluster_bench -scenario segment_read -role reader -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0`
+- A2：同 A1，`-shuffle_seed 20261115`
+- A3 urma_perf seq：`~/gap/spdk/build/examples/urma_perf -w read -o 8388608 -T 1 -b 1 -t 60 -n 1 -g 0 -l 0 -M cpu`，env `URMA_PERF_ADDR_MODE=seq`
+- A4 urma_perf rand：同 A3，env `URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`，加 `--range-bytes 4194304000000`
+- A5：同 A1，`-num_threads 1`
+- A6：同 A2，`-num_threads 1`
+- A7（可选）：同 A4，去掉 `--range-bytes`（全 namespace）
+- 每臂记录：起止、完整命令/env、stdout 日志（tee 到 `logs/<arm>.log`）、V3 路径+大小+md5、target 日志时间窗、`URMA_SLOW_IO` 行数；写 marker。
+
+## 6. 分析（写 analyze.ok）
+
+- A3/A4/A7：`python3 ~/gap/scripts/decode_urma_stage_v3.py <v3> --out ~/gap/results/GAP-08/<arm>_agg.txt`（脚本从交接仓取，放到 node1 的 `~/gap/scripts/`；不得从 gap 外执行）。
+- Mooncake 臂：`grep -c URMA_SLOW_IO logs/<arm>.log`；awk 汇总 `target_us/bdev_us/data_us/outside_us/residual_us`（≤20 行）。
+- target：按每臂时间窗截取最后两个 10 s dump 块（W9 与 push JFC）。
+- 生成 `SUMMARY.md`：每臂 E2E（bench/urma 输出）+ target W9/C2H + 慢 IO 计数；**只列数据，不做解释**。
+
+## 7. 收尾（写 cleanup.ok；仅在核心 A1–A4 全部完成时执行）
+
+- 停 bench/urma（自然退出）；停 master（pidfile，SIGTERM）；target SIGTERM；`target_nvme_takeover.sh -r -y` 还盘（**必须 -y**）；验 4457 不监听、vfio 设备数 0。
+- 若 A1–A4 有失败或中途 BLOCKED：**不还盘、不停 target/master**，写 `BLOCKED.md`（现场、已完成臂、失败原因），等开发侧。
+- 回执给：各步骤状态、prefill 耗时与分配量、每臂数值摘要、产物路径+md5、结束态。
 
 ## 回执必答（第一行）
 
-master 是否启动成功并监听 50056/8086/9006；PID；metrics 可读；是否出现报错。
+master/注册/prefill 是否成功；A1–A4 是否完成；每臂 E2E 与 target W9/C2H 关键值；是否已收尾。
