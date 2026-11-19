@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-09（小工作集快速预实验 150k，可执行）**；GAP-08 的 500k prefill 已按用户要求中止，master/target 保持运行
+- 当前任务：**GAP-10（用现有 294k keys 跑 4 臂，可执行）**；master/target/注册保持运行；GAP-08/09 已中止
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -168,7 +168,8 @@
 | GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
 | GAP-07 | 2026-11-19 | 构建 + target 启动（原大任务，后续已拆分） | 已关闭（阶段性） | 6/6 产物构建成功：`urma_perf` `c653c0a6…`、`stress_cluster_bench` `f5425d77…`、`nvmf_tgt` `6668b490…`、`mooncake_master` `ec8ef785…`、`nof_register` `bfe476ea…`；补丁只含 `urma_perf.c`（patch `eea4ca39…`，应用后 `614b008c…`）；target 已在 `4457` 起来（RAID0/strip 256/11 盘，timing dump 正常）；§1b 起未执行 |
 | GAP-08 | 2026-11-19 | **无人值守连跑（用户明确要求）**：master → NoF 注册 → prefill 3.81TiB → 核心 4 臂 → 次要 2 臂 → 分析 → 收尾；带 marker 断点续跑、逐步落盘、硬阻塞即停 | 已中止（用户时间原因） | master（50056/8086/9006，PID 3280372）与注册（5 TiB，4457）成功；bench 重建 `USE_UB=ON` 后 prefill 实测 ~1.9 GB/s，500k/3.81TiB 需 ~37 min，**用户不接受 → 中止，转 GAP-09（150k 快速预实验）**；master/target 保持运行 |
-| GAP-09 | 2026-11-19 | 120 秒/臂、300k × 8MiB（≈2.29 TiB）快速实验：停 prefill → 10s 读检查（失败则补灌）→ 核心 4 臂（120s）→ 分析；裸 SPDK 读完整 5 TiB 池 → 两臂均不绕回；标注"非 500k 口径、范围差异" | 待执行 | — |
+| GAP-09 | 2026-11-19 | 120 秒/臂、300k × 8MiB（≈2.29 TiB）快速实验：停 prefill → 10s 读检查（失败则补灌）→ 核心 4 臂（120s）→ 分析；裸 SPDK 读完整 5 TiB 池 → 两臂均不绕回；标注"非 500k 口径、范围差异" | 已中止（方法错误，无有效臂） | prefill 停于 294,669 keys（2.4718 TB）；10s 检查误判 duration 语义 + `SPDK_URMA_TRACE=1` 导致 9min/468MB；后又擅自补灌（已停）。源码核实：**write 单线程顺序 → 294,669 keys 是连续前缀**；**read 支持 -duration**。现场未破坏 |
+| GAP-10 | 2026-11-19 | 用现有 294k keys 跑 4 臂：20s duration 探针 → A1/A2 Mooncake seq/rand 4t（120s，seed 0/42，去 SPDK_URMA_TRACE）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；不补灌、不动 master/target | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -765,7 +766,10 @@ master/注册/prefill 是否成功；A1–A4 是否完成；每臂 E2E 与 targe
 
 ---
 
-# GAP-09（待执行 · 2026-11-19）· 120 秒/臂、300k keys（≈2.29 TiB）快速实验
+# GAP-09（已中止 · 2026-11-19）· 120 秒/臂、300k keys（≈2.29 TiB）快速实验
+
+> **中止原因**：§1 的 10s 检查把 `segment_read` 当成“只读 N 秒”，叠加 `SPDK_URMA_TRACE=1` 导致 9 分钟/468MB，未拿到 failed；随后又擅自起补灌（已停）。**未产生任何有效臂数据**。现场未破坏；转 GAP-10。
+> **源码核实（开发侧）**：`segment_write` 为**单线程顺序写**（keys 0..N-1），已写 294,669 keys 即连续前缀；`segment_read` **支持 `-duration`**（`stress_cluster_bench.cpp:1417-1420`）。
 
 > **用户决定（2026-11-19）**：每臂 **120 秒**；数据量按 120 秒的读量选：**300,000 keys × 8 MiB = 2,516,582,400,000 B（≈2.29 TiB）**。
 > **选值依据（不绕回是硬前提）**：
@@ -818,3 +822,50 @@ master/注册/prefill 是否成功；A1–A4 是否完成；每臂 E2E 与 targe
 ## 回执必答（第一行）
 
 10 s 检查的 failed 数；是否补灌；A1–A4 是否完成；**每臂读量 / 范围 / 余量 / 是否 WRAP**；E2E 与 target W9/C2H 关键值。
+
+---
+
+# GAP-10（待执行 · 2026-11-19）· 用现有 294k keys 跑 4 臂（不补灌；120 s；去掉 TRACE=1）
+
+> **前置事实（GAP-09 回执 + 开发侧源码核实）**：
+> - 已写 **294,669 keys（2.4718 TB）**；`segment_write` 是**单线程顺序写**（`stress_cluster_bench.cpp:1251` 注释 + 进度输出）→ 已写的是**连续前缀 0..294,668**。
+> - `segment_read` **支持 `-duration`**（`:1417-1420`：duration==0 单遍，否则 `RunSegmentReadDuration`）。之前 9 分钟是 `SPDK_URMA_TRACE=1` 拖慢 + 用法错误，不是 duration 不支持。
+> - **不补灌**：2.4718 TB；120 s × 16.4 GB/s = 1.968 TB，余量 25.6%；2.4718 TB > RAM 2.261 TB。
+> 约束：只动 bench；**不动 master / target / 注册**；不补灌；不新增参数；每步落盘。
+
+## 0. 前置核对
+
+- 从 prefill 日志取最后一条 `Written i/300000`，记 `W`：
+  - `W ≥ 294000` → `NUM_KEYS=294000`；
+  - `0 < W < 294000` → `NUM_KEYS=W`（记录）；
+  - 取不到 → 停手回报。
+- 确认 node1 无 bench/urma 残留；master/target/注册状态与 GAP-09 结束时一致。
+
+## 1. 20 秒 duration 探针（验证 `-duration` 生效）
+
+- 用 `NUM_KEYS`、`-duration 20` 跑一次（env 同下面 Mooncake 臂，**不含 `SPDK_URMA_TRACE`**）。
+- 预期 ~20–30 s 退出；**若 >60 s 未退 → kill 并停手回报**（不硬跑后续）。
+- 记录 `failed` 与耗时；`failed>0` → 停手回报（**不补灌**，先报告）。
+
+## 2. 四臂（每臂 `-duration 120`；`-num_keys $NUM_KEYS`；无 `SPDK_URMA_TRACE`）
+
+Mooncake 臂 env：`LD_LIBRARY_PATH`（gap 构建库）、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、`SPDK_URMA_STAGE_TRACE_US=500`。**不要 `SPDK_URMA_TRACE=1`**。
+- A1 seq 4t：`~/gap/bench/stress_cluster_bench -scenario segment_read -role reader -protocol ub -device_name "$DEV" -master_server 141.61.84.149:50056 -master_admin_port 9006 -metadata_server http://141.61.84.149:8086/metadata -value_size 8388608 -num_keys $NUM_KEYS -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 120 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0`
+- A2：同 A1，`-shuffle_seed 42`
+- A3 urma_perf seq（V3 env 同 GAP-08 §5）：`-w read -o 8388608 -T 1 -b 1 -t 120 -n 1 -g 0 -l 0 -M cpu`，`URMA_PERF_ADDR_MODE=seq`，`--range-bytes 5497558138880`
+- A4 urma_perf rand：同 A3，`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`
+- 每臂 watchdog：>180 s 未退 → kill、标 `INVALID`、停手回报。
+- 每臂跑完立即算绕回：
+  - Mooncake：`ops × 8 MiB` vs `NUM_KEYS × 8 MiB`（294000 → 2.4663 TB）；超出 → `WRAP`，作废并停手回报；
+  - urma：总字节 vs `5,497,558,138,880`；超出 → `WRAP`，作废并停手回报。
+- 记录：命令/env、耗时、bench 统计、`URMA_SLOW_IO` 行数、V3 路径+md5、target 时间窗。
+
+## 3. 分析 / 回执
+
+- A3/A4 解码 V3；Mooncake 臂给 bench 统计 + 慢 IO 计数 + target 最后两个 10 s dump。
+- 标注：**294k keys（2.47 TB）非 500k；裸 SPDK 读完整 5 TiB 池（范围差异记录）**。
+- 不清理：master/target 保持运行。
+
+## 回执必答（第一行）
+
+`NUM_KEYS`；20 s 探针是否按时退出、failed 数；A1–A4 是否完成；**每臂读量 / 范围 / 余量 / 是否 WRAP**；E2E 与 target W9/C2H 关键值。
