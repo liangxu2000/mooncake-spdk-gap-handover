@@ -63,7 +63,7 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 | 编号 | 日期 | 内容 | 状态 | 回执摘要 |
 | --- | --- | --- | --- | --- |
-| R7-01 | 2026-11-19 | 只读情报：Round7 设计前置（打点开关 / 重启 target 数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 本地 Round5 诊断文件） | 待执行 | — |
+| R7-01 | 2026-11-19 | 只读情报：Round7 设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 本地 Round5 诊断文件 / 源码版本与二进制归属） | 待执行 | — |
 
 ---
 
@@ -74,11 +74,20 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 > 机器：node2、node4（即你 11-19 交接文档中的两台）。
 > Round6 中你已经读全的配置与结果不必重读；本任务只查下方问项。
 
+> **开发侧已从公开源码核实（SPDK `e12b7cb21` / Mooncake `706551a8`），下列问项只需核对本机部署与源码一致，不必重新探索：**
+> - target 聚合分段：`SPDK_URMA_TARGET_DUMP_SEC=<秒>`（transport 创建时读取，周期 dump；`target_nvme_takeover.sh -s <秒>` 即此开关），代码常开，无需特殊编译。
+> - per-IO 跨端账本（Round7 用）：initiator 设 `SPDK_URMA_STAGE_TRACE_US=<µs>` 后每个请求才带 `trace_seq`；两侧设 `SPDK_URMA_STAGE_{READER,TARGET}_SINK=buffer` + `_PATH`（文件，O_EXCL）+ `_CAPACITY`（记录数，192 B/条）后，进程退出时落二进制文件（头/尾魔数 `URMA3B01` / `URMA3END`，side=1 initiator / 2 target）。
+> - `SPDK_URMA_TRACE=1` 只控制 LEGACY 模式下的 per-IO CSV tx/rx trace；LEGACY 模式下 initiator 对超阈值请求打印 `URMA_SLOW_IO ...` 行（含 target 各阶段 tick）。
+> - `MC_WORKERS_PER_CTX` 默认 2（transfer-engine env）。
+> - master NoF 心跳默认：间隔 10 s、单次探测超时 1000 ms、连续失败阈值 3（≈30 s 卸载）；`--nof_heartbeat_interval_sec / --nof_heartbeat_probe_timeout_ms / --nof_heartbeat_failures_threshold` 为 master 启动参数。
+>
+> **但机器上有两个未提交修改文件（`urma_perf.c`、`trace_defs.h`），且两仓远端分支已前进（SPDK 尖端 `e90642ea3`、Mooncake 尖端 `af253a2`）——所以"机器实际运行的代码"仍需 H 节核对。**
+
 ## A. target 侧阶段计时
 
 - **A1** Round6 中 Mooncake 测试与裸 SPDK 测试各自启动的 target：分别使用哪个 `nvmf_tgt` 二进制（路径 + md5）？是否同一个文件？给出启动脚本的 `文件:行号`。
-- **A2** target 侧阶段打点（`NVMF_URMA_TGT_STAGE`）的启用方式：编译期常开 / 编译开关 / 运行时 env？给出开关名与取值、输出落到哪里（源码 `文件:行号`）。
-- **A3** 打点本身的额外开销：每请求或每 child 有几个计时点、调用什么时钟（源码依据）；Round6 `seq_diag` 那次 target timing 实际是怎么开启的（命令或脚本原文 ≤10 行）。
+- **A2** 核对：本机 `nvmf_tgt` 二进制是否包含上述聚合打点与 stage buffer 代码（用 `strings` 找 `URMA3B01`、`SPDK_URMA_STAGE_TARGET_SINK`、`SPDK_URMA_TARGET_DUMP_SEC` 即可）；Round6 `seq_diag` 的启动命令里实际带了哪些开关（脚本/日志原文 ≤10 行）。
+- **A3** 核对：本机版本与公开 `e12b7cb21` 的打点差异（若 H2 的 diff 涉及打点代码，指出文件:行号）；`seq_diag` 那次的 target 日志是否就是聚合 dump。
 - **A4** 若 A1 结论是两套测试用的不是同一个二进制：逐项列出两边 target 启动参数差异（strip、`-C` / `-U`、reactor/核、iobuf、队列深度、listener 等），并给出各自来源 `文件:行号`。
 
 ## B. 本方测试 target 重新拉起时的数据安全（只取证；**本任务不启动、不重启、不 takeover**）
@@ -95,8 +104,8 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 ## C. 客户端阶段账本
 
-- **C1** `SPDK_URMA_STAGE_TRACE_US` 与 `SPDK_URMA_TRACE` 两个 env 的作用：各自的含义、输出位置与格式、每 IO 的计时点数量（`文件:行号`）。
-- **C2** 上述 trace 覆盖哪些阶段？能否给出与 target 侧 `W4a / W9 / push JFC` 同层级的客户端分段（如 Query / Submit / Wait / NoFRead 数据段）？
+- **C1** 核对：本机 `urma_perf` / Mooncake 客户端链接的 SPDK 库中是否存在 `SPDK_URMA_STAGE_READER_SINK` / `SPDK_URMA_STAGE_TRACE_US` 及 `URMA3B01` 字样（`strings` + `文件:行号`）。注意：这是 **URMA 传输层**的阶段（submit/send/completion + 对端 target 阶段），不是 Mooncake 的 NoFRead/Query/Wait 层。
+- **C2** Mooncake 客户端层（Query / NoFRead / Submit / Wait）的现成计时通道：`spdiag` 之外还有哪些（env/日志/编译开关），各自覆盖哪些阶段、开销如何；给 `文件:行号`。
 - **C3** `spdiag` 的 SHM 由谁创建、谁附加：为什么 master 先启动、SHM 后创建时表为空（`文件:行号`）；是否存在不重启 master 的热附加通道。
 - **C4** 除 `.ylt.log` 的 `rtt_us=`（已知）外，还有哪些现成客户端通道能给出每请求阶段耗时（env / 日志 / trace 点），各自开销如何。
 
@@ -126,13 +135,23 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
   - 不要贴整份文件；总摘录 ≤40 行。
 - **G2** 该文件与你 11-19 文档（Round6 事实清单）的**冲突点**：若两处数字或结论不一致，逐项列出（各自给行号）。
 
+## H. 源码版本与二进制归属核对（只读）
+
+> 你提供的两仓信息已由开发侧核实为 public；以下逐条核对"机器上的代码/二进制"与"公开 commit"是否一致。**只读 git 命令，不 fetch、不 pull、不 checkout、不改文件。**
+
+- **H1** node2 / node4 上 SPDK 源码树位置；每棵树的 `git rev-parse HEAD`、`git status --porcelain`、`git remote -v`、`git branch --show-current`（或 `git describe --all`）。确认是否与你提供的 `e12b7cb21` / `urma_enable_v2` 一致，两节点是否同一棵树。
+- **H2** 两个未提交修改文件的差异：`examples/nvme/urma_perf/urma_perf.c`、`include/spdk_internal/trace_defs.h` 的 `git diff --stat` + 完整 diff（≤200 行；超长给 hunk 标题 + 关键 hunk）+ 两文件的 `md5sum`。
+- **H3** 二进制归属：`nvmf_tgt` 与 `urma_perf` 的可执行文件路径 + `md5sum` + `ls -l` 时间；用构建目录里的 .o/ninja 时间或 `strings` 特征，判断它们是否由 H1 这棵树 + H2 的修改编出（不需要重编）。
+- **H4** Mooncake 源码树（node2 的 `mooncake-930`）：`git rev-parse HEAD`、`git status --porcelain`、`git remote -v`；确认是否 `706551a8` / `nof-gdr-supercache-snapshot-930`，是否也有未提交修改（若有，同 H2 给 diff）。
+- **H5** 部署文档一致性：`docs/yin/mooncake_nof_deployment.md` 记录的是旧配对（`urma_modified_v6` + `nof-urma-v2`），与当前分支不一致；只需列出该文档中**仍在使用、但可能与当前代码不符**的启动参数或 env（≤10 条，给文档行号），不要贴全文。
+
 ## 约束
 
 - **共用机、非独占**：不触碰任何非本方进程；不重启 master / target；不走 takeover / restore；不装卸驱动（详见《协作约定》§6 最高优先级红线）。
 - 纯只读：不启动/停止任何进程，不 mount/unmount，不碰 vfio 与盘，不修改任何文件（`/tmp` 探针脚本用完即删）。
 - 不运行任何压测、不重新 prefill。
 - 非交互执行（`sudo -n`）。
-- 回执按《协作约定》§5 五段格式；逐条编号回答 A1–G2，**不要下结论性判断，只给事实与依据**。
+- 回执按《协作约定》§5 五段格式；逐条编号回答 A1–H5，**不要下结论性判断，只给事实与依据**。
 
 ## 回执必答的一句话（放在回执第一行）
 
