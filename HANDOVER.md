@@ -6,12 +6,15 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**R7-01（待执行）**
+- 当前任务：**GAP-02（待执行）**
+
+> **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
+> 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
 
 ## 协作约定
 
 1. **方向单向**：本文件只由开发指挥 Agent 更新并 push；测试执行 Agent 只 pull。
-2. **任务编号**：`R7-01`、`R7-02`…（Round7 系列）；状态：`待执行` / `执行中` / `待回执` / `已关闭`。
+2. **任务编号**：`GAP-01`、`GAP-02`…（本项目自有序列）；状态：`待执行` / `执行中` / `待回执` / `已关闭`。
 3. **事实与推测必须分开**：所有陈述按 `[事实]` / `[推算]` / `[未获取]` 三类标注（沿用你 11-19 交接文档的写法）。
    - `[事实]`：直接读到或实测，附来源（`文件:行号` / 命令 / 原始输出）。
    - `[推算]`：由事实四则运算得到，写出式子，可复算。
@@ -54,23 +57,23 @@
 你的 11-19 交接文档（Round6 事实清单）是当前基线；Round6 已量出差距，并拿到部分 target 侧分段账本与客户端 RPC RTT
 （数字以你的文档 §4 为准，本仓不重复）。
 
-Round7 的路径：**先定位、后消除**。第一步是在同一 target 配置、同一测量窗口、同一套打点下，对 Mooncake 与裸 SPDK
+我们的路径：**先定位、后消除**。第一步是在同一 target 配置、同一测量窗口、同一套打点下，对 Mooncake 与裸 SPDK
 的 seq / rand 各臂同时取 target 侧分段与客户端侧分段，把 ~200 µs 差距定位到具体层、具体段；定位清楚后再选优化项。
 
-R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风险、口径查清楚。**本任务不跑任何压测。**
+`GAP-01` 是只读前置任务：把设计首轮实测（`GAP-03`）所需的开关、风险、口径查清楚。**该任务不跑任何压测。**
 
 ## 任务历史
 
 | 编号 | 日期 | 内容 | 状态 | 回执摘要 |
 | --- | --- | --- | --- | --- |
-| R7-01 | 2026-11-19 | 只读情报：Round7 设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 本地 Round5 诊断文件 / 源码版本与二进制归属） | 已关闭 | 同一 `nvmf_tgt`（md5 `95ce0bfd…`）；两路 target 参数 4 处不同（`-s`/taskset/`-L`/`-I`）；master 心跳实际关闭（3600s×999999），500k keys 元数据仍在（4.19 TB，精确 500000×8 MiB）；Round6 无 prefill；客户端仅阈值采样/≤8192 行 CSV；裸 SPDK=`urma_perf -T1 -b1`、rand 覆盖全 namespace；H 节未答（并入 R7-02） |
-| R7-02 | 2026-11-19 | 只读：补 H 节（源码/二进制归属 + 2 个未提交文件 diff）+ 打点能力核对（target 聚合 / LEGACY / stage buffer 在三个二进制中是否可用）+ Round7 参数匹配事实（`-I` 实际值、两条 `-L` 库 md5、taskset、ns 容量、最近启动命令行） | 待执行 | — |
+| GAP-01（原 R7-01） | 2026-11-19 | 只读情报：首轮实测设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 同事 Round5 诊断文件 / 源码版本与二进制归属） | 已关闭 | 同一 `nvmf_tgt`（md5 `95ce0bfd…`）；两路 target 参数 4 处不同（`-s`/taskset/`-L`/`-I`）；master 心跳实际关闭（3600s×999999），500k keys 元数据仍在（4.19 TB，精确 500000×8 MiB）；同事 Round6 无 prefill；客户端仅阈值采样/≤8192 行 CSV；裸 SPDK=`urma_perf -T1 -b1`、rand 覆盖全 namespace；H 节未答（并入 GAP-02） |
+| GAP-02（原 R7-02） | 2026-11-19 | 只读：补 H 节（源码/二进制归属 + 2 个未提交文件 diff）+ 打点能力核对（target 聚合 / LEGACY / stage buffer 在三个二进制中是否可用）+ 实测参数匹配事实（`-I` 实际值、两条 `-L` 库 md5、taskset、ns 容量、最近启动命令行） | 待执行 | — |
 
 ---
 
-# R7-01（已关闭 · 2026-11-19）· 只读情报收集：Round7 设计前置
+# GAP-01（已关闭 · 2026-11-19）· 只读情报收集：首轮实测设计前置
 
-> 回执已收（见任务历史摘要）。H 节未答，并入 R7-02。
+> 回执已收（见任务历史摘要）。H 节未答，并入 GAP-02。
 
 > **性质：纯只读**。不改任何文件、不启停任何进程、不碰盘/vfio、不重启。不需要独占窗口。
 > 若某个问项必须写操作才能取证：跳过，在回执里记 `[未获取] 需要写操作`。
@@ -79,7 +82,7 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 > **开发侧已从公开源码核实（SPDK `e12b7cb21` / Mooncake `706551a8`），下列问项只需核对本机部署与源码一致，不必重新探索：**
 > - target 聚合分段：`SPDK_URMA_TARGET_DUMP_SEC=<秒>`（transport 创建时读取，周期 dump；`target_nvme_takeover.sh -s <秒>` 即此开关），代码常开，无需特殊编译。
-> - per-IO 跨端账本（Round7 用）：initiator 设 `SPDK_URMA_STAGE_TRACE_US=<µs>` 后每个请求才带 `trace_seq`；两侧设 `SPDK_URMA_STAGE_{READER,TARGET}_SINK=buffer` + `_PATH`（文件，O_EXCL）+ `_CAPACITY`（记录数，192 B/条）后，进程退出时落二进制文件（头/尾魔数 `URMA3B01` / `URMA3END`，side=1 initiator / 2 target）。
+> - per-IO 跨端账本（GAP-03 可用）：initiator 设 `SPDK_URMA_STAGE_TRACE_US=<µs>` 后每个请求才带 `trace_seq`；两侧设 `SPDK_URMA_STAGE_{READER,TARGET}_SINK=buffer` + `_PATH`（文件，O_EXCL）+ `_CAPACITY`（记录数，192 B/条）后，进程退出时落二进制文件（头/尾魔数 `URMA3B01` / `URMA3END`，side=1 initiator / 2 target）。
 > - `SPDK_URMA_TRACE=1` 只控制 LEGACY 模式下的 per-IO CSV tx/rx trace；LEGACY 模式下 initiator 对超阈值请求打印 `URMA_SLOW_IO ...` 行（含 target 各阶段 tick）。
 > - `MC_WORKERS_PER_CTX` 默认 2（transfer-engine env）。
 > - master NoF 心跳默认：间隔 10 s、单次探测超时 1000 ms、连续失败阈值 3（≈30 s 卸载）；`--nof_heartbeat_interval_sec / --nof_heartbeat_probe_timeout_ms / --nof_heartbeat_failures_threshold` 为 master 启动参数。
@@ -126,7 +129,7 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 - **F1** 完整读取 `equal_key_audit.json`，把 rand 与 seq_b 两个臂的跳跃分桶补全（只给表，不贴文件）。
 - **F2** node2 / node4 当前相关进程与监听端口快照（只读，一行一项；含进程属主、启动时长、启动命令/工作目录，并标注是否属于 Round6 本方测试链路；依据不足标 `[未获取]`，不要猜）。
-- **F3** Round6 每个 Mooncake arm 的总耗时（driver.log 的 rc 与总时长），用于估算 Round7 窗口。
+- **F3** 同事 Round6 每个 Mooncake arm 的总耗时（driver.log 的 rc 与总时长），用于估算实测窗口。
 
 ## G. 用户指定的本地诊断文件（只读）
 
@@ -158,18 +161,18 @@ R7-01 是 Round7 的只读前置任务：把设计 Round7 所需的开关、风�
 
 ## 回执必答的一句话（放在回执第一行）
 
-Round7 能否在 ①不重做 prefill ②两套测试同 target 二进制同参数 ③两端都开阶段计时 这三个前提下开跑；不能的部分，缺什么。
+GAP-03 能否在 ①不重做 prefill ②两套测试同 target 二进制同参数 ③两端都开阶段计时 这三个前提下开跑；不能的部分，缺什么。
 
 ---
 
-# R7-02（待执行 · 2026-11-19）· 只读：补 H 节 + Round7 实验前置核对
+# GAP-02（待执行 · 2026-11-19）· 只读：补 H 节 + 首轮实测前置核对
 
 > **纯只读**：不启动/停止任何进程、不碰盘/vfio、不跑压测、不修改文件（`/tmp` 探针脚本用完即删）。
-> 你 R7-01 的回执 A–G 已收到；本任务补齐未答的 H 节，并加 I/J 两节，为 R7-03（需用户独占窗口的实测）定参数与账本方案。
+> 你 GAP-01 的回执 A–G 已收到；本任务补齐未答的 H 节，并加 I/J 两节，为首轮实测 GAP-03（需用户独占窗口）定参数与账本方案。
 > 目的只有三个：①确认机器代码/二进制与公开 commit 的差异；②确认三套打点在三个被测二进制里各自是否可用；③拿到参数匹配所需的事实。
 > 机器：node2、node4（共用机、非独占，红线同《协作约定》§6）。
 
-## H. 源码版本与二进制归属（若 R7-01 已做过，直接复用结果）
+## H. 源码版本与二进制归属（若 GAP-01 已做过，直接复用结果）
 
 - **H1** node2 / node4 上 SPDK 源码树位置；每棵树的 `git rev-parse HEAD`、`git status --porcelain`、`git remote -v`、`git branch --show-current`（或 `git describe --all`）。确认是否为 `e12b7cb21` / `urma_enable_v2`，两节点是否同一棵树。
 - **H2** 两个未提交修改文件：`examples/nvme/urma_perf/urma_perf.c`、`include/spdk_internal/trace_defs.h` 的 `git diff --stat` + 完整 diff（≤200 行；超长给 hunk 标题 + 关键 hunk）+ 两文件 `md5sum`。
@@ -177,14 +180,14 @@ Round7 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 - **H4** Mooncake 源码树（node2 的 `mooncake-930`）：`git rev-parse HEAD`、`git status --porcelain`、`git remote -v`；是否也有未提交修改（若有，同 H2 给 diff）。
 - **H5** 部署文档一致性：`docs/yin/mooncake_nof_deployment.md` 记录的是旧配对（`urma_modified_v6` + `nof-urma-v2`）；只列出该文档中**仍在使用、但可能与当前代码不符**的启动参数或 env（≤10 条，给文档行号），不贴全文。
 
-## I. 打点能力核对（决定 R7-03 用哪套客户端账本）
+## I. 打点能力核对（决定 GAP-03 用哪套客户端账本）
 
 - **I1** `nvmf_tgt` 二进制 strings 检查：`URMA3B01`、`SPDK_URMA_STAGE_TARGET_SINK`、`SPDK_URMA_TARGET_DUMP_SEC` 是否出现（各给 是/否 + 1 行样例）。
 - **I2** `urma_perf` 二进制 strings 检查：`URMA3B01`、`SPDK_URMA_STAGE_READER_SINK`、`SPDK_URMA_STAGE_TRACE_US`。
 - **I3** Mooncake 客户端实际链接的 SPDK：`ldd` 解析出的库路径 + md5；对这些库做与 I2 相同的 strings 检查。若客户端是多进程（client/master），指明哪一个进程负责 NoF 读写。
 - **I4** 汇总一张表：三套通道（target 聚合 dump / LEGACY `URMA_SLOW_IO` 慢 IO / stage buffer V3）在 **nvmf_tgt、urma_perf、Mooncake 客户端** 三处各自可用与否。只给事实，不给建议。
 
-## J. Round7 参数匹配所需事实（只读）
+## J. 实测参数匹配所需事实（只读）
 
 - **J1** Mooncake target 启动的实际 `-I` 值：从 `start_mooncake.py` 的 `select_nvme_devices` 逻辑推导（给公式与变量来源），或从 Round6 target 启动日志/命令行快照里找实际值；给 `文件:行号`。
 - **J2** 两条 `-L` 库目录（Mooncake 侧 `/home/tong/umdk_gpu_isolated/lib`、裸 SPDK 侧 `/home/yin/gdr/UMDK_netlab/lib`）的文件清单：`liburma*.so*`、`liburma_common*` 的 `ls -l` + `md5sum`；判断是否同一构建。
