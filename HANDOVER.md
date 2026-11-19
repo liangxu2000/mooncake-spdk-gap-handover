@@ -104,6 +104,8 @@
 
 `GAP-01` 是只读前置任务：把设计首轮实测（`GAP-06`）所需的开关、风险、口径查清楚。**该任务不跑任何压测。**
 
+> **代码 provenance（2026-11-19 核实）**：GitHub 上的两个 commit 均可拉取（SPDK `e12b7cb21` / `urma_enable_v2`；Mooncake `706551a8` / `nof-gdr-supercache-snapshot-930`）。但 **node2/node4 机器上还有未提交修改**：SPDK 工作区至少 7 个文件（`urma_perf.c` +145 行、`trace_defs.h` +6 行已取证；`nvme_pcie_common.c`、`nvme_pcie_internal.h`、`nvme_qpair.c`、`target_nvme_takeover.sh`、`lib/nvmf/urma.c`（node2 +44 行）未展开）；Mooncake 树 7 处（docs、go.mod/go.sum、`client_service.cpp`、`master_service.cpp` 等）。**因此"GitHub 代码 = 机器代码"不成立**。node1/node3 是另一套：node1 SPDK HEAD `6ceebf91`（更旧、无 stage buffer）；node3 的树无 `.git`，来源无法由上 commit 证明。
+
 ## 任务历史
 
 | 编号 | 日期 | 内容 | 状态 | 回执摘要 |
@@ -443,6 +445,7 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
   - 从 e3bd runtime 日志/文档确认 target 使用的 URMA 设备名；与 initiator 的 `-device_name` 一致。若与 `udmac1d1e2` 不同，以实际为准并记录。
   - `strings` 复核 target 二进制含 `SPDK_URMA_STAGE_TARGET_SINK` / `SPDK_URMA_TARGET_DUMP_SEC`。
 - **0.3 bench 语义核对（只读）**：打出 `stress_cluster_bench --help` 全文（或从源码确认），逐项确认：`-master_server`、`-master_admin_port`（必须 9006）、`-metadata_server`（必须 `http://<node3>:8086/metadata`）、`-protocol ub`、`-device_name`、`-scenario segment_read/segment_write`、`-replica_num 0`、`-nof_replica_num 1`、`-nof_qpairs_per_segment 4`、`-batch_size 1`、`-shuffle_seed`、`-duration`、`-num_keys`、`-value_size`、`-warmup_keys`、`-nof_segments`、`-global_segment_size` 的语义。**若有任一项与§2 命令不符 → 停手回报，不改方案。**
+- **0.3b bench 必须复制进 `~/gap`（用户 2026-11-19 明确要求）**：把 node1 的 `stress_cluster_bench` 及其运行依赖（`libasio.so` 等）只读复制到 `~/gap/bench/`，`md5sum` 与源一致；**命令一律用 `~/gap/bench/stress_cluster_bench`，不得直接执行 `~/nds/...` 下的原件**（那是别的项目在用的，不能干扰）。`cwd=~/gap/...`，日志只写 gap。复制后用 `LD_LIBRARY_PATH=~/gap/lib:~/gap/bench` + `LD_BIND_NOW=1 --help` 验证；`ldd` 解析到的 gap 外库只读，不修改。
 - **0.4 NoF 注册工具（只读 + 复制到 gap）**：把 node3 的 `nof_register` / `nof_unregister`（e3bd runtime 内）复制到 node1 的 `~/gap/`（只读源、写 gap）；`--help` 取关键参数；确认注册命令能把 target `4457` 注册到 master `50056`。当前 master metrics 里有一条 `trsvcid:4457` 但容量 0 的记录 → 确认是否需要先 unregister 再 register。
 - **0.5 大页与 NUMA（只读）**：node3 `HugePages_*` 与**每个 NUMA 节点**的空闲页；按 iobuf `8192,8192,1024,8388608`（≈8256 MiB）与 taskset `2-7`（属 node0）判断单 NUMA 是否够；不够时按节点补页（记录前后值，可回退）。
 - **0.6 内存**：node1/node3 `free -g`；V3 只用于 urma_perf 臂（每进程按 12,000,000 条 ≈ 2.3 GB 预留）。
@@ -472,7 +475,7 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 ## 1d. prefill（500k × 8 MiB = 3.81 TiB）
 
-- 用 `stress_cluster_bench -scenario segment_write -role writer`：
+- 用 `~/gap/bench/stress_cluster_bench -scenario segment_write -role writer`：
   `-protocol ub -device_name <设备> -master_server <node3>:50056 -master_admin_port 9006 -metadata_server http://<node3>:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 16 -batch_size 8 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -global_segment_size 0 -local_buffer_size 536870912`
 - 若 `-global_segment_size 0` 导致 setup 失败 → 回落默认 4 GB 并记录。
 - 记录写入量、耗时、失败数；验收 `master_nof_allocated_bytes = 4,194,304,000,000`（允许等价误差）。超过 30 min 或失败 → 停手回报。
@@ -499,7 +502,7 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 | 臂 | 命令/配置 |
 | --- | --- |
-| G6-1 | Mooncake `segment_read`，4 线程，顺序：`-role reader -protocol ub -device_name <设备> -master_server <node3>:50056 -master_admin_port 9006 -metadata_server http://<node3>:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0` |
+| G6-1 | `~/gap/bench/stress_cluster_bench -scenario segment_read`，4 线程，顺序：`-role reader -protocol ub -device_name <设备> -master_server <node3>:50056 -master_admin_port 9006 -metadata_server http://<node3>:8086/metadata -value_size 8388608 -num_keys 500000 -num_threads 4 -batch_size 1 -warmup_keys 64 -duration 60 -shuffle_seed 0 -replica_num 0 -nof_replica_num 1 -nof_qpairs_per_segment 4 -local_buffer_size 536870912 -global_segment_size 0` |
 | G6-2 | 同 G6-1，`-shuffle_seed 20261115` |
 | G6-3 | 同 G6-1，`-num_threads 1` |
 | G6-4 | 同 G6-2，`-num_threads 1` |
@@ -536,7 +539,7 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 - 用户已宣布独占（2026-11-19）：**按 PID 停进程已授权**；仍禁 pkill/killall、reboot、rmmod udma、动系统服务/他人进程。
 - **工作目录铁规**：node1/node3 上所有写入只在 `~/gap` 内；gap 外只读，严禁修改/删除/移动/创建（见《工作目录铁规》）。
-- 不改代码、不重编；只用 GAP-05 验证过的现有二进制（md5 以 GAP-05 回执为准）。
+- 不改代码、不重编；只用 GAP-05 验证过并**已复制到 `~/gap` 的副本**（md5 以回执为准）。**不直接执行 gap 外的工具/二进制**（避免干扰其他项目）。
 - 资料最小化：V3 原始文件不传；每臂聚合表 ≤40 行。
 - 任何一步与预期不符（段丢失、V3 不落盘、dropped 过多、他人负载超标）→ 停止并回报，不自行改方案。
 
