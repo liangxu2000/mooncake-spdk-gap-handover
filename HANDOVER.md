@@ -39,6 +39,7 @@
    > - 禁止重启 master / target 或任何共享服务；禁止走 target takeover / restore；禁止装卸共享驱动。
    > - **只有用户在当轮对话中明确宣布"独占"（如"佛挡杀佛"）时**，才允许对确认占用资源的他人进程按 PID 处理（先 TERM，10 s 后 KILL；仍禁止 pkill/killall）。
    > - 任务书里若与本条冲突，以用户当轮明确口径为准；没有明确宣布，一律按共用机处理。
+   > - **范围区分（2026-11-19）**：node2 / node4 仍为公用机，按上述约束；**node1 / node3 已由用户宣布独占**——独占期内停占用资源的进程无需逐次请示（按 PID，先 TERM 后 KILL；禁 pkill/killall），**重启等危险操作仍需先问**。
 
    - 默认只读；不启停进程、不碰盘/vfio、不改文件、不重启、不装卸驱动。
    - 需要写临时探针脚本时沿用 base64 方式写到 `/tmp`，用后立即删除。
@@ -62,7 +63,7 @@
 | Mooncake client 侧 RPC | **50156** | 必须显式传（具体开关在任务预检里核实） |
 
 - **本轮机器（2026-11-19 用户定）：node1 / node3**。角色（连接文档声明，GAP-04 核实）：**node1 = initiator / client（有 GPU）**，**node3 = target / master（无 GPU）**；两台不同物理机，数据跨机。**必须保持 initiator ≠ target**（组长第 1 条要求）。
-- **独占与高风险授权（2026-11-19 用户宣布）**：node1/node3 现为本方独占；**GAP-05 §0 的两个遗留进程停止、GAP-06 的 vfio 接管/还原与本方 target/master 启停，均已获用户当轮整体授权**。仍禁止：pkill/killall、reboot、rmmod udma、动他人进程；异常即停并回报；**授权范围之外的新类型高风险动作**仍需先问。
+- **独占与高风险授权（2026-11-19 用户宣布）**：node1/node3 现为本方独占。**独占期内，停任何占用资源的进程都无需逐次请示（按 PID，先 TERM 后 KILL）**；GAP-06 的 vfio 接管/还原与本方 target/master 启停也已整体授权。仍禁止：pkill/killall、reboot、rmmod udma、动系统服务/sshd/网络；异常即停并回报；**授权范围之外的新类型高风险动作（如重启）仍需先问**。
 - **启动前必须做端口占用检查**；任一端口被他人占用 → 停手回报，不得抢占、不得改回同事的端口。
 - 已核实的源码事实（供预检对照）：
   - master 三个端口都有显式 flag：`--rpc_port` / `--http_metadata_server_port` / `--metrics_port`（`mooncake-store/src/master.cpp:134/410/547`）。
@@ -75,6 +76,20 @@
 - **所有写入只允许发生在 `~/gap` 内**：脚本、日志、结果、V3 文件、临时文件。`/tmp` 仅限一次性探针且用完即删，长期产物一律放 `~/gap`。
 - **`~/gap` 之外一律只读**：可以只读查看或执行已有的二进制、库、脚本与系统路径；**严禁修改、删除、移动、创建任何 gap 外的文件或目录**。
 - 回执/台账里的产物路径写 `~/gap/...` 形式，不写绝对 home 路径。
+
+## 环境重建原则（2026-11-19 开发侧定，GAP-05/06 执行）
+
+前提：node1/node3 的 `~/gap` 为空；但两台机器和 node2/node4 上已有可复用的构件。**优先"只读搬"，其次"编译"，最后"自己写小工具"**；所有落盘只在 `~/gap`，原目录只读。
+
+1. **能搬就搬**（只读源 → 写入 gap）：
+   - target：node3 现有 `nvmf_tgt`（V3 完整，md5 `e7440ae0…`）；启动脚本从 node2/node4 复制到 node3 的 gap，副本改 `LISTEN_PORT=4457`。
+   - initiator（裸 SPDK）：node2/node4 上带 V3 的 `urma_perf` 复制到 node1 的 gap；ABI 不兼容则走第 3 条。
+   - Mooncake：node3 的 e3bd 构建（client/master + 依赖）复制到 node1 的 gap（client）与 node3 的 gap（master）；`LD_LIBRARY_PATH` 指向 gap 内副本，避免依赖 gap 外路径。
+2. **能跑就用**：`--help` / `ldd` / 最小冒烟（不连 target）验证；记录 md5 与运行条件。
+3. **跑不起来才编**（fallback）：从 node2/node4 复制现有 SPDK 源码树（含未提交修改）到 node1 的 gap 编译 `urma_perf`；不改源码。Mooncake 若需重编，同样复制源码到 gap 编译；记录编译配置与耗时。
+4. **没有现成驱动就写小工具**：Mooncake 侧若无现成 bench，在 gap 里写一个最小驱动（调 Mooncake 客户端 API），实现 500k key、8 MiB GET、seq/rand、4 线程、60 s、warmup；同时负责 prefill（写 500k × 8 MiB）。工具只放 gap，不进任何同事仓库。
+5. **打点缺口如实记录**：若 Mooncake 客户端拿不到 V3/慢 IO 账本，就用 target 聚合 dump + 客户端 E2E + 可行的 Mooncake 慢请求通道；把"客户端账本缺失"写进匹配矩阵与回执，**不用其他层的数据冒充**。
+6. **不碰 gap 外**：构建产物、日志、结果、脚本副本全在 gap。
 
 ## 背景与总目标（供理解任务用，回执不必复述）
 
