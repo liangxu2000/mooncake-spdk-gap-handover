@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-07（构建 + 首轮实测，可执行）**
+- 当前任务：**GAP-08（只起我方 master 并验收，可执行）**；GAP-07 其余阶段已拆分，逐单下发
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -49,6 +49,14 @@
 7. **长任务**：预计超过 30 min 的任务，每 ~15 min 输出一行进度（阶段 / 已完成问项 / 阻塞）。
 8. **不猜原则**：任务书中凡要求取证的点，一律以实测或源码为准；无法取得的，按 `[未获取]` 记录并说明，不要下结论。
 9. **长命令状态汇报**：编译、压测、长脚本执行期间，按 §7 定期报进度，不要长时间无输出。
+
+## 任务拆分原则（2026-11-19 用户强调，优先级最高）
+
+- **一单一阶段、一个验收点**：每个任务只覆盖一个阶段（如"只起 master"、"只注册"、"只 prefill"、"只跑一组臂"）。
+- 测试 agent **只执行任务书里的逐条命令与验收**：不选型、不自行改参数、不扩大范围、不做设计判断。
+- 任何不确定/冲突 → 停在 `[未获取]` / `[冲突]` 并回报，由开发侧决定。
+- 拿到回执、核对通过后再发下一单；**禁止把构建 + 起服务 + prefill + 多臂 + 分析塞进一单**（无人值守连跑是例外，需用户明确要求且任务书自带幂等/断点/兜底）。
+- 历史大任务（如 GAP-07 原稿）里未执行的部分一律作废，按拆分后的小单重新下发。
 
 ## 端口规范（2026-11-19 用户定，所有任务生效）
 
@@ -148,7 +156,8 @@
 | GAP-04 | 2026-11-19 | 新环境接入与只读侦察：node1/node3 连接与角色、硬件/盘/URMA、代码与二进制（含 V3 打点）、端口占用、工作集与容量 | 已关闭 | 两台可登录、不同物理机；文档角色 node1=initiator/client、node3=target/master；node3 的 `nvmf_tgt` 带完整 V3（md5 `e7440ae0…`），**node1 的 `urma_perf` 与我方 Mooncake 客户端均不带 V3**；盘各 11×7.68 TB；4457 空闲；node3 的 50056/8086/9006/50156 被**本方 23 h 遗留进程**占用；工作集=0；node3 大页 9.06 GB（iobuf 需 ~8.06 GB，余量小）；两台 liburma `5c021f7f…`（≠ node2/4） |
 | GAP-05 | 2026-11-19 | 工具补齐与可行性验证（只读 + 仅写 `~/gap`）：e3bd 栈盘点、跨机复制并 `--help` 验证 urma_perf / Mooncake client、确认 50156 开关、大页核算 | 已关闭 | node1 已有带 V3 的 `urma_perf`（`~/gap/bin` + `~/gap/lib`，`--help` rc=0）；复制版 e3bd client/master 通过 `LD_BIND_NOW`；**node1 本机已有 `stress_cluster_bench`（推翻 GAP-04"无 bench"结论）**；50156 = client `-port`；node3 大页 4640 页（需 4641，脚本自动上调；4 NUMA 各 1160 页）；node3 四端口已释放 |
 | GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
-| GAP-07 | 2026-11-19 | 构建 + 首轮实测（可执行）：gap 内最新源码 + 仅 `urma_perf.c` 随机补丁 → 编译 SPDK/Mooncake → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
+| GAP-07 | 2026-11-19 | 构建 + target 启动（原大任务，后续已拆分） | 已关闭（阶段性） | 6/6 产物构建成功：`urma_perf` `c653c0a6…`、`stress_cluster_bench` `f5425d77…`、`nvmf_tgt` `6668b490…`、`mooncake_master` `ec8ef785…`、`nof_register` `bfe476ea…`；补丁只含 `urma_perf.c`（patch `eea4ca39…`，应用后 `614b008c…`）；target 已在 `4457` 起来（RAID0/strip 256/11 盘，timing dump 正常）；§1b 起未执行 |
+| GAP-08 | 2026-11-19 | 只起我方 master（node3，50056/8086/9006）并验收；不注册、不 prefill、不跑臂 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -486,7 +495,10 @@ node1 上是否已具备可运行的 Mooncake 客户端与带 V3 的 `urma_perf`
 
 ---
 
-# GAP-07（待执行 · 2026-11-19）· 构建 + 首轮实测：同参数 target 下 Mooncake vs 裸 SPDK 的 8 MiB 读双层账本
+# GAP-07（已关闭 · 阶段性 2026-11-19）· 构建 + target 启动（原大任务，后续阶段已拆分）
+
+> **执行情况**：Stage A 六个产物全部构建成功；§1 target 已在 4457 起来并通过打点验收；按用户指令停手，§1b 及之后**未执行**。
+> **以下 §1b 起为历史计划，已作废；后续按 GAP-08 起的小单逐条下发，不要按本文件续跑。**
 
 > **前置（GAP-06 完成后）**：代码基线 = **GitHub 最新代码**（SPDK `urma_enable_v2` tip，Mooncake `nof-gdr-supercache-snapshot-930` tip）+ **随机读补丁**（从同事目录取，应用到 `~/gap` 内副本）；**全部在 `~/gap` 内 clone + 编译，只运行 gap 内产物**。
 > **构建前置**：工具链、DPDK/UMDK 依赖、外网可达性先核实；构建失败 → 停手回报，不擅自换源码。
@@ -630,6 +642,7 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 ## 5. 约束
 
 - 用户已宣布独占（2026-11-19）：**按 PID 停进程已授权**；仍禁 pkill/killall、reboot、rmmod udma、动系统服务/他人进程。
+- **常备坑（2026-11-19 实测）**：`target_nvme_takeover.sh -r`（还盘）**必须带 `-y`**；否则 `confirm()` 会等 stdin，非交互下永久挂死（本次已挂 6 分钟后按 PID 清除）。
 - **工作目录铁规**：node1/node3 上所有写入只在 `~/gap` 内；gap 外只读，严禁修改/删除/移动/创建（见《工作目录铁规》）。
 - 本轮**允许在 `~/gap` 内从确认源码编译**（唯一例外）；**只运行 gap 内自行构建的产物**，不执行 gap 外的工具/二进制。除随机读补丁外不改代码、不做性能优化。
 - 资料最小化：V3 原始文件不传；每臂聚合表 ≤40 行。
@@ -638,3 +651,35 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 ## 回执必答的一句话（第一行）
 
 构建是否全部成功（各产物 md5、补丁 md5、构建耗时）；各臂是否全部完成；prefill 耗时；Mooncake 与 urma_perf 的 E2E、target `bdev`（W9）、`data`（C2H）三项的均值与 p99 差值；各自客户端账本口径（LEGACY vs V3）与样本量。
+
+---
+
+# GAP-08（待执行 · 2026-11-19）· 只起我方 master 并验收（不注册、不 prefill、不跑臂）
+
+> **一单一阶段**：本任务只做"启动 master + 验收端口/日志"。**不碰 target、不注册 NoF、不 prefill、不跑任何臂。**
+> 前置状态（GAP-07 结束态）：target 仍在 node3 的 4457 运行（PID 3243095），**保持不动**；构建产物均在 `~/gap`；node3 大页已上调。
+> 机器：node3（master 与 target 同机；initiator 在 node1）。
+
+## 1. 启动（只执行这一条链路）
+
+- 用 gap 内已构建的 master：`~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master`
+- 先 `ldd` 该二进制确认依赖；`LD_LIBRARY_PATH` 只指向 gap 内构建产物（系统库除外）；记录 ldd 与所用 `LD_LIBRARY_PATH`。
+- 启动命令（参数逐字照抄，未经开发侧同意不得改）：
+  `~/gap/mooncake_src/src/build/mooncake-store/src/mooncake_master --rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006 --nof_heartbeat_interval_sec=120 --nof_heartbeat_failures_threshold=5`
+- 日志：`~/gap/logs/mooncake_master.log`；PID 写 `~/gap/run/mooncake_master.pid`。
+
+## 2. 验收（逐条）
+
+- `ss -ltnp | grep -E ':(50056|8086|9006)\b'` → 三个端口都在 LISTEN，PID 与 pidfile 一致。
+- `curl -s http://127.0.0.1:9006/metrics | grep -E 'master_nof_allocated_bytes|master_total_nof_capacity_bytes'` → 能读到指标，记录值（预期工作集 0）。
+- 日志无启动报错（`grep -i error` 前 10 行）。
+- 记录：完整命令行、PID、启动时间、三个端口、日志路径、ldd 结果。
+
+## 3. 停止点
+
+- 到验收即停，**不做注册/不 prefill**；回报上述事实。
+- 若端口被占、启动失败、或 ldd 缺库 → 停手回报，不自行改端口/参数。
+
+## 回执必答（第一行）
+
+master 是否启动成功并监听 50056/8086/9006；PID；metrics 可读；是否出现报错。
