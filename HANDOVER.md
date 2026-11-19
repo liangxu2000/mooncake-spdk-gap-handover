@@ -49,6 +49,25 @@
 8. **不猜原则**：任务书中凡要求取证的点，一律以实测或源码为准；无法取得的，按 `[未获取]` 记录并说明，不要下结论。
 9. **长命令状态汇报**：编译、压测、长脚本执行期间，按 §7 定期报进度，不要长时间无输出。
 
+## 端口规范（2026-11-19 用户定，所有任务生效）
+
+**不能照搬同事的端口。我们启动的 Mooncake 组件端口一律以 6 结尾；SPDK nvmf target 用 4457。**
+
+| 组件 | 端口 | 说明 |
+| --- | --- | --- |
+| SPDK nvmf target listener（trsvcid） | **4457** | 固定。旧 4421 / 4420 停用；若已有旧 listener，先 `nvmf_subsystem_remove_listener` |
+| Mooncake master RPC | **50056** | 必须显式传（默认 50051） |
+| Mooncake master HTTP metadata | **8086** | 必须显式传（默认 8080） |
+| Mooncake master metrics | **9006** | 必须显式传（默认 9003） |
+| Mooncake client 侧 RPC | **50156** | 必须显式传（具体开关在任务预检里核实） |
+
+- 节点按本环境角色：master / client 在 node2，target 在 node4（用户表格里的 "node3" 是旧环境标注；本轮若要换节点，由用户在派任务时明确）。
+- **启动前必须做端口占用检查**；任一端口被他人占用 → 停手回报，不得抢占、不得改回同事的端口。
+- 已核实的源码事实（供预检对照）：
+  - master 三个端口都有显式 flag：`--rpc_port` / `--http_metadata_server_port` / `--metrics_port`（`mooncake-store/src/master.cpp:134/410/547`）。
+  - SPDK `target_nvme_takeover.sh:96` 把 `LISTEN_PORT` 写死为 4420 → **用脚本副本改 4457**，不改原脚本，记录原/新脚本 md5。
+  - TE RPC 端口范围 `MC_MIN_RPC_PORT / MC_MAX_RPC_PORT` 经 `mooncake-transfer-engine/src/config.cpp:842` 的 `ValidatePortRange` 校验，**排除 32768–60999（临时端口段）**；50156 落在该段内 → 若客户端走这两个 env，50156 会被拒绝并回落到 15000–17000。50156 到底由哪个开关控制，必须在预检里核实；若无法设置，回执提出替代（如 15556 / 16556，同样以 6 结尾），由用户定。
+
 ## 背景与总目标（供理解任务用，回执不必复述）
 
 项目总目标：**消除 Mooncake 与裸 SPDK 在 8 MiB 读上的 ~200 µs 时延差距**。这是同事交接的原始问题，
@@ -69,7 +88,7 @@
 | GAP-01（原 R7-01） | 2026-11-19 | 只读情报：首轮实测设计前置（打点开关 / target 重新拉起的数据安全 / 客户端阶段通道 / 对照口径 / worker 旋钮 / 同事 Round5 诊断文件 / 源码版本与二进制归属） | 已关闭 | 同一 `nvmf_tgt`（md5 `95ce0bfd…`）；两路 target 参数 4 处不同（`-s`/taskset/`-L`/`-I`）；master 心跳实际关闭（3600s×999999），500k keys 元数据仍在（4.19 TB，精确 500000×8 MiB）；同事 Round6 无 prefill；客户端仅阈值采样/≤8192 行 CSV；裸 SPDK=`urma_perf -T1 -b1`、rand 覆盖全 namespace；H 节未答（并入 GAP-02） |
 | GAP-02（原 R7-02） | 2026-11-19 | 只读：补 H 节（源码/二进制归属 + 未提交文件 diff）+ 打点能力核对 + 实测参数匹配事实 | 已关闭 | 三套打点在三个二进制均可用（V3 env 串在，魔数不显）；两节点 `nvmf_tgt` 非同一文件（被测 target 在 node4）；`-L`/`-I` 实际相同，实质差异只剩 `-s` 与 taskset；源码树 7 处未提交改动（node2 多 `urma.c` +44 行）；Mooncake 客户端运行期 liburma 为第三条路径（md5 `87d4fb60…`）；ns 容量 84.5 TB = Mooncake 工作集的 15.4 倍；V3 源码在 HEAD（宏拼接，回执"源码已不在磁盘"的判断需更正） |
 | GAP-03 | 2026-11-19 | 只读条件审计：把同事全部实验逐臂提取「客户端/target/master 节点、数据路径是否跨节点、参数与库」，标出同节点/条件不可比的数字 | 待执行 | — |
-| GAP-04 | 2026-11-19 | 首轮实测（需独占授权）：同 target 参数下 6 臂 × 60 s，客户端 V3 逐请求账本 + target 聚合 dump，输出各段分解 + 条件台账 | 待执行 | — |
+| GAP-04 | 2026-11-19 | 首轮实测（需独占授权）：按端口规范起本方 target(4457)/master(50056/8086/9006) + prefill；同 target 参数下 6 臂 × 60 s，客户端 V3 逐请求账本 + target 聚合 dump，输出各段分解 + 条件台账 | 待执行 | — |
 
 ---
 
@@ -247,6 +266,8 @@ GAP-04 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 - **3.1** 列出同事材料里**所有被用来做 SPDK vs Mooncake 对比的数字对**，逐对标注两边的 strip、I/O 大小、QD/并发、随机范围、target 参数、节点角色。任一项不同 → 标"条件不可比"。
 - **3.2** 特别核对：`0.4667 ms`（Mooncake）与 `259.92 µs`（SPDK）这一对，以及 Round6 的 466.6 vs 245.7、655.6 vs 327.2，各自的条件是否一致（strip、节点、随机范围、target 参数）。
 - **3.3** 给一张"**可用数字 / 不可用数字**"清单：可作为 gap 证据的数字与出处；不能用的数字与原因。
+- **3.4** 同事各实验用的端口：master RPC / HTTP metadata / metrics、target listener、客户端 RPC 各是多少（`文件:行号`）；是否存在端口冲突、复用别人端口、或改了端口未 remove 旧 listener 的情况。
+- **3.5** 历史 prefill 事实：同事材料里是否有 prefill 的记录（写入量、耗时）；若有给出处，没有则标 `[未获取]`。用于估算 GAP-04 §1b 的时间。
 
 ## 4. 交付
 
@@ -270,7 +291,7 @@ GAP-04 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 
 > **硬门：只有用户在本轮对话中明确宣布"独占"（例如"现在可以独占/佛挡杀佛"）才允许执行 §1 及之后的所有步骤。若未明确宣布：只做 §0 只读预检，然后停手回报；不得启动 target、不得停任何进程。**
 > 目标：把 ~200 µs（同口径 222 µs）差距定位到具体层/段。**本轮不改代码、不重编、不优化。**
-> 预计占机 45–60 min。机器：node2（客户端）/ node4（target）。共用机红线见《协作约定》§6。
+> 预计占机 60–90 min（含我方 master 启动与 prefill）。机器：node2（master/client）/ node4（target）。共用机红线见《协作约定》§6。**端口严格按《端口规范》执行。**
 
 ## 0. 预检（只读；未授权时到此为止）
 
@@ -287,16 +308,34 @@ GAP-04 能否在 ①不重做 prefill ②两套测试同 target 二进制同参�
 - **0.4 内存**：node2/node4 `free -g`；V3 每条记录 192 B，按 12,000,000 条预分配 ≈ 2.3 GB/进程。
 - **0.5 `--range-bytes` 语义**：给出 urma_perf `--range-bytes` 的 usage 与代码位置（`文件:行号`），确认它如何把随机范围限制到指定字节数。
 - **0.6 快照**：现有 target/master/client 进程与端口；master metrics 的 NoF 段与已分配字节（复核 500k keys）。
-- **0.7 确认 target 当前确实停止**（4420 未监听、vfio 无设备）。
+- **0.7 确认 target 当前确实停止**（旧 listener 未监听、vfio 无设备）。
+- **0.8 端口预检**：
+  - 按《端口规范》核实五个端口的实际开关（master 三个 flag 已知；client 50156 的开关必须核实，含 `MC_MIN_RPC_PORT/MC_MAX_RPC_PORT` 的临时端口段限制）；
+  - 占用检查：`ss -ltnp | grep -E ':(4457|50056|8086|9006|50156)\b'`；被他人占用 → 停手回报；
+  - 解释器脚本副本：确认 `target_nvme_takeover.sh:96` 的 `LISTEN_PORT=4420`，准备副本改为 4457。
+- **0.9 我方 master 与 keys 影响（必读）**：
+  - 旧 master（Round6 那个）保持不动；本轮按端口规范起**我方新 master**（50056/8086/9006）。新 master 没有旧元数据，**500k keys 需要本轮重新 prefill**；除非预检发现旧 master 启用了 snapshot/restore（检查命令行与 snapshot 目录）——若有，先回报再定。
+  - **prefill 会覆盖盘上旧数据**：旧 master 的 keys 在本轮之后将不可用。进入 §1b 前必须把这个副作用写进回执（用户已授权独占即视为知情）。
+  - 若 prefill 预计耗时超过 30 min 或失败 → 停手回报。
 
-## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致）
+## 1. 启动 target（仅在授权后；参数与 Mooncake 侧完全一致；listener=4457）
 
-- 用 `target_nvme_takeover.sh`，按 GAP-02 J5 的 Mooncake 启动参数原样：
+- 复制 `target_nvme_takeover.sh` 到本轮产物目录，**只把 `LISTEN_PORT` 改为 4457**，其余不动；记录原/新脚本 md5 与 1 行 diff。
+- 用副本启动，参数与 Mooncake 侧一致：
   外层 `taskset -c 2-7`；`-R 256 -m 0xfc -C 64 -O 8388608 -I 8192,8192,1024,8388608 -N udmac1d1e2 -L /home/tong/umdk_gpu_isolated/lib -p urma -s 10 -y`
   盘序与 Round6 相同（11 块数据盘，按脚本现算的字典序）。
+- 若 target 上已有旧 listener（4420/4421）→ 先 `nvmf_subsystem_remove_listener` 再加 4457；记录命令原文。
 - 记录：完整命令行原文、PID、启动时间、listener、`nvmf_tgt` md5、`/tmp/nvmf_tgt.log` 路径。
-- 验收：4420 监听；`/tmp/nvmf_tgt.log` 出现 URMA target timing 头部；master 侧段仍挂载、key 数不变（若段被卸载或 key 数变化 → 停手回报，不 prefill）。
-- **不动 master；不重启 master；不 prefill。**
+- 验收：**4457** 监听；`/tmp/nvmf_tgt.log` 出现 URMA target timing 头部。
+- **不动旧 master。**
+
+## 1b. 启动我方 master（新端口）+ prefill
+
+- 在 node2 起我方 master：`--rpc_port=50056 --http_metadata_server_port=8086 --metrics_port=9006`（其余参数照旧 master 命令行逐项记录原文；**不动旧 master 进程**）。
+- 客户端 / NoF 注册指向 `50056`；NoF 注册端口 `4457`。
+- **prefill：500k keys × 8 MiB = 3.81 TiB**，用 Round6 驱动的首次写入路径（`--reuse-keys` 关、`--keep-keys` 开；具体参数照 Round6 脚本）。记录写入量、耗时、失败数。
+- 验收：master key 数 = 500000；NoF 段挂载；`master_nof_allocated_bytes` = 4,194,304,000,000（允许等价误差）。失败或预计超过 30 min → 停手回报。
+- 之后各 Mooncake 臂用 `--reuse-keys` 复用本轮 keys。
 
 ## 2. 测量臂（每臂 60 s；顺序如下）
 
@@ -306,12 +345,14 @@ SPDK_URMA_STAGE_TRACE_US=1
 SPDK_URMA_STAGE_READER_SINK=buffer
 SPDK_URMA_STAGE_READER_PATH=<每臂唯一路径>
 SPDK_URMA_STAGE_READER_CAPACITY=12000000
+MC_NOF_PORT=4457
+（客户端 RPC 50156 按 §0.8 核实出的开关显式设置；若不可设 → 停手回报）
 ```
 target 侧：`-s 10`（聚合 dump 进 `/tmp/nvmf_tgt.log`）。
 
 | 臂 | 配置 |
 | --- | --- |
-| G3-1 | Mooncake seq，4 workers（现配置；沿用 Round6 驱动，`--reuse-existing-keys --no-start-env`，时长 60 s） |
+| G3-1 | Mooncake seq，4 workers（沿用 Round6 驱动，指向我方 master:50056，`--reuse-keys --no-start-env`，时长 60 s） |
 | G3-2 | Mooncake rand，4 workers（同上） |
 | G3-3 | Mooncake seq，1 worker（`--nof-workers 1`） |
 | G3-4 | Mooncake rand，1 worker |
@@ -336,9 +377,10 @@ target 侧：`-s 10`（聚合 dump 进 `/tmp/nvmf_tgt.log`）。
 ## 4. 收尾与回退
 
 - 停 client / urma_perf（自然退出，等 V3 落盘）；target 用 SIGTERM 停（**不要 SIGKILL**），确认 `/tmp/nvmf_tgt.log` 尾部完整。
-- 若本轮做过 disk takeover：`target_nvme_takeover.sh -r` 还盘，确认盘回 nvme、4420 不监听、vfio 设备数 0。
-- 回退：master 不动、keys 不动；若 target 起不来或段丢失 → 停手回报，不 prefill、不重启 master。
-- 结束态与你进入时一致（target 停、盘还原）。
+- 停我方 master（记录 PID，SIGTERM）；**旧 master 全程不动**。
+- 若本轮做过 disk takeover：`target_nvme_takeover.sh -r` 还盘，确认盘回 nvme、4457 不监听、vfio 设备数 0。
+- 回退：旧 master 不动；若 target 起不来或 prefill 失败 → 停手回报，不重启旧 master、不擅改端口。
+- 结束态：target 停、盘还原、我方 master 停、旧 master 原样；在回执里写明"prefill 已覆盖盘上旧数据，旧 master 的 keys 不可用"。
 
 ## 5. 约束
 
