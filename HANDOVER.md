@@ -158,7 +158,7 @@
 | GAP-06 | 2026-11-19 | 随机读补丁获取与适配性验证（只读 + 仅写 `~/gap`）：从 node2/node4 取完整 diff/commit + 独立 patch 文件，clone 最新 SPDK（`170cbb94…`）并 `git apply --check`，报告能否直接应用/需移植的 hunk | 已关闭 | 补丁=同事工作区 diff（base `e12b7cb`，6 文件 329+/6− + 未跟踪 `nvme_p99_v7.h`），无提交/无独立 patch；**随机读只在 `urma_perf.c`（+145 行）**；默认 apply 仅 usage 1 行上下文失败（`dmabuf`→`cpu`），`-C1` 全通过（小移植）；最新 tip 已自带 V3/`DUMP_SEC`/`TRACE_US`；node1 无外网，源码经 Windows 中转 |
 | GAP-07 | 2026-11-19 | 构建 + target 启动（原大任务，后续已拆分） | 已关闭（阶段性） | 6/6 产物构建成功：`urma_perf` `c653c0a6…`、`stress_cluster_bench` `f5425d77…`、`nvmf_tgt` `6668b490…`、`mooncake_master` `ec8ef785…`、`nof_register` `bfe476ea…`；补丁只含 `urma_perf.c`（patch `eea4ca39…`，应用后 `614b008c…`）；target 已在 `4457` 起来（RAID0/strip 256/11 盘，timing dump 正常）；§1b 起未执行 |
 | GAP-08 | 2026-11-19 | **无人值守连跑（用户明确要求）**：master → NoF 注册 → prefill 3.81TiB → 核心 4 臂 → 次要 2 臂 → 分析 → 收尾；带 marker 断点续跑、逐步落盘、硬阻塞即停 | 已中止（用户时间原因） | master（50056/8086/9006，PID 3280372）与注册（5 TiB，4457）成功；bench 重建 `USE_UB=ON` 后 prefill 实测 ~1.9 GB/s，500k/3.81TiB 需 ~37 min，**用户不接受 → 中止，转 GAP-09（150k 快速预实验）**；master/target 保持运行 |
-| GAP-09 | 2026-11-19 | 小工作集快速预实验：150k × 8MiB（≈1.14 TiB）——停 prefill → 10s 读检查（失败则补灌）→ 核心 4 臂（150k）→ 分析；标注"小工作集、不与 500k 并列" | 待执行 | — |
+| GAP-09 | 2026-11-19 | 120 秒/臂、300k × 8MiB（≈2.29 TiB）快速实验：停 prefill → 10s 读检查（失败则补灌）→ 核心 4 臂（120s）→ 分析；标注"非 500k 口径；裸 SPDK 臂绕回" | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -657,7 +657,7 @@ target 侧：`-s 10`（聚合 dump 进 target 日志）。
 
 # GAP-08（已中止 · 2026-11-19）· 无人值守连跑：master → 注册 → prefill → 核心 4 臂 → 次要 2 臂 → 收尾
 
-> **中止原因（2026-11-19 用户定）**：500k × 8 MiB 的 prefill 实测 ~1.9 GB/s，需 ~37 min，用户不接受。改为 **GAP-09 小工作集快速预实验（150k keys ≈ 1.14 TiB）**；master / target / 5 TiB 注册保持不动，不重新注册。
+> **中止原因（2026-11-19 用户定）**：500k × 8 MiB 的 prefill 实测 ~1.9 GB/s，需 ~37 min，用户不接受。改为 **GAP-09：120 秒/臂、300k keys（≈2.29 TiB）**；master / target / 5 TiB 注册保持不动，不重新注册。
 
 > **本次为用户明确要求的无人值守连跑（"一单一阶段"的例外）**：按固定顺序自动执行，**每步完成立即落盘、写进度、写 marker**；不等待用户输入。
 > **最重要数据先跑**：master → 注册 → prefill → 核心 4 臂（Mooncake seq/rand 4t、urma_perf seq/rand）→ 次要 2 臂（Mooncake 1t）→ 可选第 7 臂。
@@ -755,9 +755,11 @@ master/注册/prefill 是否成功；A1–A4 是否完成；每臂 E2E 与 targe
 
 ---
 
-# GAP-09（待执行 · 2026-11-19）· 小工作集快速预实验（150k × 8 MiB ≈ 1.14 TiB）
+# GAP-09（待执行 · 2026-11-19）· 120 秒/臂、300k keys（≈2.29 TiB）快速实验
 
-> **用户决定（2026-11-19）**：不接受 500k/3.81 TiB 的 37 分钟 prefill。改用 **150,000 keys × 8 MiB = 1,258,291,200,000 B（≈1.14 TiB）** 先拿方向性数据；**标注"小工作集预实验"，不与 500k 口径并列**。
+> **用户决定（2026-11-19）**：每臂 **120 秒**；数据量按 120 秒的读量选：**300,000 keys × 8 MiB = 2,516,582,400,000 B（≈2.29 TiB）**。
+> **选值依据**：120 s × Mooncake 顺序 ~16.4 GB/s ≈ 2.0 TB，2.52 TB 有 28% 余量（Mooncake 臂不绕回）；2.52 TB > 物理内存 2.26 TB；**裸 SPDK 臂会绕回**（顺序 ~3.9 TB/120s → 1.55×，随机 ~2.9 TB → 1.16×），在台账中标注"参考臂绕回"。
+> 预计 prefill：2.52 TB ÷ 1.9 GB/s ≈ 22 min（若中止的 500k prefill 已覆盖前 300k，10 s 读检查会直接通过，无需重灌）。**标注"非 500k 口径"，不与同事基线并列**。
 > 前置：master（50056/8086/9006）、target（4457）、5 TiB 注册**保持不动**；只停当前 prefill。
 > 约束：gap-only、PID 停进程（禁 pkill）、root 运行（D2）、每步落盘。
 
@@ -766,30 +768,30 @@ master/注册/prefill 是否成功；A1–A4 是否完成；每臂 E2E 与 targe
 - `ps -eo pid,args | grep stress_cluster_bench` → 记 PID；`kill -TERM`；10 s 后仍在则 `kill -KILL`；记录停止时刻与当时的 `master_nof_allocated_bytes`。
 - **不动 master / target / 注册**。
 
-## 1. 10 秒读检查（150k keys）
+## 1. 10 秒读检查（300k keys）
 
-- 用 150k 做 10 s 顺序读（root；env 同 GAP-08 §5 的 Mooncake 臂；`-duration 10`，其余参数同 A1 但 `-num_keys 150000`）。
+- 用 300k 做 10 s 顺序读（root；env 同 GAP-08 §5 的 Mooncake 臂；`-duration 10`，其余参数同 A1 但 `-num_keys 300000`）。
 - 记录 `failed` 数：
   - `failed=0` → 直接 §2；
   - `failed>0` → §1b。
 
-## 1b. 补灌 150k（仅 failed>0 时）
+## 1b. 补灌 300k（仅 failed>0 时）
 
-- `segment_write -num_keys 150000 -num_threads 32 -batch_size 16`（其余参数同 GAP-08 prefill 命令）；记录耗时与速率；完成后重跑 §1 的 10 s 检查；仍 failed>0 → 停手回报。
+- `segment_write -num_keys 300000 -num_threads 32 -batch_size 16`（其余参数同 GAP-08 prefill 命令）；记录耗时与速率；完成后重跑 §1 的 10 s 检查；仍 failed>0 → 停手回报。
 
-## 2. 核心 4 臂（各 60 s；`-num_keys 150000`）
+## 2. 核心 4 臂（每臂 120 s；`-num_keys 300000`）
 
-- A1 Mooncake seq 4t（`-shuffle_seed 0`）
-- A2 Mooncake rand 4t（`-shuffle_seed 42`）
-- A3 urma_perf seq：`-w read -o 8388608 -T 1 -b 1 -t 60 -n 1 -g 0 -l 0 -M cpu`，`URMA_PERF_ADDR_MODE=seq`，`--range-bytes 1258291200000`
-- A4 urma_perf rand：同 A3，`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`，`--range-bytes 1258291200000`
+- A1 Mooncake seq 4t：同 GAP-08 A1 命令，但 `-num_keys 300000`、`-duration 120`、`-shuffle_seed 0`
+- A2 Mooncake rand 4t：同 A1，`-shuffle_seed 42`
+- A3 urma_perf seq：`-w read -o 8388608 -T 1 -b 1 -t 120 -n 1 -g 0 -l 0 -M cpu`，`URMA_PERF_ADDR_MODE=seq`，`--range-bytes 2516582400000`
+- A4 urma_perf rand：同 A3，`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`，`--range-bytes 2516582400000`
 - 公共 env、V3/LEGACY、落盘、marker 同 GAP-08 §5。`--range-bytes` 假设数据从段首顺序分配；记录实际 `master_nof_allocated_bytes` 并标注该假设。
 - A5/A6（Mooncake 1t）时间够再跑；不做 A7。
 
 ## 3. 分析与回执
 
 - A3/A4 用解码脚本出聚合表；Mooncake 臂给 bench 统计 + `URMA_SLOW_IO` 计数 + target 最后两个 10 s dump。
-- 标注：**小工作集（150k）预实验；seq 臂在最快读速下可能绕回 1.14 TiB 范围，仅供方向参考**。
+- 标注：**300k keys / 2.29 TiB，非 500k 口径；裸 SPDK 臂在 120 s 内会绕回（顺序 ~1.55×、随机 ~1.16×），仅参考臂；Mooncake 臂不绕回**。
 - **不清理**：master/target 保持运行，便于之后决定是否扩到 500k。
 
 ## 回执必答（第一行）
