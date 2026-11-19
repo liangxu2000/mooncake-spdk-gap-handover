@@ -173,7 +173,7 @@
 | GAP-11 | 2026-11-19 | 清洁 4 臂：10s 无打点探针（确认速率）→ A1/A2 Mooncake seq/rand 4t（120s，seed 0/42）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验/分析；两侧均无 client trace，target `-s 10` 为共同口径 | 已中止（仅探针） | 无打点探针仍 **6.70 GiB/s**（打点不是瓶颈）；`-duration` 结束后续读 190s、无 FINAL SUMMARY。源码核实：`ValidateMeasuredRead` 受 `-verify` 门控（默认 true）→ 每 8MiB 读多一次 8MiB 比较（计时区间外），是 ~3.86ms/op 的最可能原因；duration 的 join 在循环后，worker 卡住则不返回。**改单遍 + verify=false** |
 | GAP-12 | 2026-11-19 | 单遍+`-verify=false`（实际执行 v1）：10k 探针定 N → A1/A2 Mooncake seq/rand 4t（单遍 N）→ A3/A4 urma_perf seq/rand（120s，range 5TiB）→ 绕回校验 | 已完成 | **`verify=false` 让 Mooncake 6.70→26.12 GiB/s（3.9×）**；A1 26.12/1194.03µs/p99 1685.58、A2 26.46/1177.41/1659.20、A3 29.21/267.405/432.64、A4 16.72/467.079/727.04；全部 failed=0、**无一绕回**；target W9/TOTAL 为 per-child（Mooncake 64×128KB、urma 32×256KB）；A1/A2 各 508MB bench breakdown 日志；D12-1 trid 接受、D12-2 key0 被 urma preflight 覆写 |
 | GAP-13 | 2026-11-19 | 只读分析：A1/A2 的 bench 逐请求 breakdown 分解（query/master/transfer/其他）→ 找 breakdown 日志开关 → 查 chunk 128KB vs 256KB 的来源与对齐方法；修正 per-parent vs per-child 口径 | 已完成 | A1/A2 = 11.0% query RPC（131µs）+ 87.6% read（1047µs）+ 0.2% 其他 + 1.2% bench 包装；breakdown 由 `MC_HIFREQ_LOG_SAMPLE_RATE`（默认 1.0）门控；Mooncake 64×128KB 来自 `MC_NOF_SUBMIT_CHUNK_BYTES`；urma 32×256KB 来自 RAID0 NOIOB 256KB；**发现并发不匹配：A1/A2 4t vs A3/A4 -T1** |
-| GAP-14 | 2026-11-19 | 同并发（1 parent in flight）+ 同 chunk（64×128KB）配对 A/B：10s 1t 探针定 N → A1'/A2' Mooncake seq/rand 1t（单遍，verify=false，日志 0.01）→ A3'/A4' urma_perf -T1（显式 `SPDK_URMA_MAX_IO_SIZE=131072`）→ 硬校验 child/父=64 → 复核 E2E/target | 待执行 | — |
+| GAP-14 | 2026-11-19 | 同并发（1 parent in flight）+ 同 chunk（64×128KB）配对 A/B，**每臂严格 120 秒**：10s 1t 探针（duration 10，verify=false，stdbuf）→ A1'/A2' Mooncake seq/rand 1t（duration 120）→ A3'/A4' urma_perf -T1（120s，显式 `SPDK_URMA_MAX_IO_SIZE=131072`）→ 硬校验 child/父=64 + 绕回校验 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -1004,39 +1004,41 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 
 ---
 
-# GAP-14（待执行 · 2026-11-19）· 同并发 + 同 chunk 的配对 A/B（1 parent in flight）
+# GAP-14（待执行 · 2026-11-19 · **每臂严格 120 秒**）· 同并发 + 同 chunk 配对 A/B（1 parent in flight）
 
-> **依据 GAP-13 + 开发侧修正**：
-> - A1/A2 是 **4 线程（约 4 个 parent 在飞）**，A3/A4 是 **-T1（1 个在飞）** → **E2E 不可直接比**（1194 vs 267µs 主要是并发差）。
-> - chunk：Mooncake 64×128KB（`MC_NOF_SUBMIT_CHUNK_BYTES` 默认 128KB）；urma 32×256KB（RAID0 NOIOB 256KB）。
-> - breakdown 日志由 **`MC_HIFREQ_LOG_SAMPLE_RATE`** 门控（默认 1.0）；本单设 **0.01**（保留样本、降开销）。
-> **目标**：同并发（**1 parent in flight**）+ 同 chunk（**64×128KB**）+ `-verify=false` + 无绕回，拿一对可比的 E2E；客户端分解用 1% 采样。
-> 约束：不改代码；不动 master/target/注册；不补灌；gap-only（`~/gap/lib_sys`）；root。
+> **用户硬要求（2026-11-19）：以后所有臂一律 120 秒，不用单遍校准。**
+> **依据 GAP-13 + 开发侧修正**：A1/A2 是 4 线程（~4 个 parent 在飞），A3/A4 是 -T1（1 个在飞）→ E2E 不可直接比；chunk 为 Mooncake 64×128KB vs urma 32×256KB。
+> **目标**：同并发（1 parent in flight）+ 同 chunk（64×128KB）+ `-verify=false` + 每臂 **`-duration 120`** + 无绕回；客户端分解用 1% 采样。
+> 约束：不改代码/bench；不动 master/target/注册；不补灌；gap-only（`~/gap/lib_sys`）；root。
 
-## 0. 10 s 单线程探针（Mooncake 1t）
+## 0. 10 s 1t 探针（duration 10，verify=false，stdbuf）
 
-- env：`LD_LIBRARY_PATH=~/gap/lib_sys`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、**`MC_HIFREQ_LOG_SAMPLE_RATE=0.01`**；无任何 trace。
-- 命令：`... -num_threads 1 -duration 0 -num_keys 10000 -verify=false -shuffle_seed 0 ...`
-- 记录 FINAL SUMMARY、failed、per-key 时间。`N = floor(120 / per_key)`，`N = min(N, 294000)`；若 `N < 50000` 或探针 >60 s / 无 SUMMARY → 停手回报。
+- env：`LD_LIBRARY_PATH=~/gap/lib_sys`、`SPDK_URMA_DEV_NAME=$DEV`、`SPDK_URMA_CAPSULE_TRANSPORT=urma`、`SPDK_URMA_MAX_IO_SIZE=8388608`、`MC_HIFREQ_LOG_SAMPLE_RATE=0.01`；无任何 trace。
+- 命令：`sudo -n /usr/bin/stdbuf -oL -eL env ... ~/gap/bench/stress_cluster_bench ... -num_threads 1 -duration 10 -num_keys 294000 -verify=false -shuffle_seed 0 ...`
+- 记录 FINAL SUMMARY、failed、墙钟、10 s 内读取字节。**120 s 预估读量 = 10 s 字节 × 12**。
+  - 若预估 > `2,466,250,752,000 B`（294k keys）→ 120 s 会绕回 → **停手回报**（不硬跑；由开发侧决定补数据或另定）。
+  - 若 >60 s 未退/无 FINAL SUMMARY/failed>0 → 停手回报。
 
-## 1. 配对 A/B（1 parent in flight）
+## 1. 配对 A/B（每臂 **120 s**）
 
-- **A1' Mooncake seq 1t**：`-num_keys N -num_threads 1 -duration 0 -verify=false -shuffle_seed 0`，日志采样 0.01。
+- **A1' Mooncake seq 1t**：§0 命令把 `-duration 10` 改 **120**、`-shuffle_seed 0`；`-num_threads 1`、`-verify=false`、日志采样 0.01。
 - **A2' Mooncake rand 1t**：同 A1'，`-shuffle_seed 42`。
-- **A3' urma_perf seq**：`-T 1 -b 1 -t 120`，**显式 `SPDK_URMA_MAX_IO_SIZE=131072`**（目标：driver 把 256KB stripe child 再切成 64×128KB），`--range-bytes 5497558138880`，无 V3。
+- **A3' urma_perf seq**：`-T 1 -b 1 -t 120`，**显式 `SPDK_URMA_MAX_IO_SIZE=131072`**（目标 64×128KB），`--range-bytes 5497558138880`，无 V3。
 - **A4' urma_perf rand**：同 A3'，`URMA_PERF_ADDR_MODE=rand URMA_PERF_RANDOM_SEED=20261115`。
 - **chunk 校验（硬门）**：每臂后从 target reset-dump 的 `n` 与完成 IO 数算 child/父；A1'/A2' 必须 64；**A3'/A4' 必须 64**。
-  - 若 urma 仍为 32 → 停手回报，不硬跑；下一步改用 **`MC_NOF_SUBMIT_CHUNK_BYTES=262144`**（Mooncake 侧纯 env，已获开发侧同意作为 fallback）。
-- 绕回校验：A1'/A2' `queries ≤ N`；A3'/A4' 总字节 ≤ `5,497,558,138,880`。
+  - 若 urma 仍 32 → 停手回报；下一步改用 `MC_NOF_SUBMIT_CHUNK_BYTES=262144`（fallback，已同意）。
+- **绕回校验（每臂后）**：
+  - A1'/A2'：`queries × 8 MiB` vs `2,466,250,752,000 B`；> → `WRAP` 作废并停手；
+  - A3'/A4'：总字节 vs `5,497,558,138,880`；> → `WRAP` 作废并停手。
 - watchdog 240 s；无 FINAL SUMMARY → 停手回报。
 
 ## 2. 分析 / 回执
 
-- E2E 为 **1 并发**口径；客户端分解用 1% 采样（query/master/transfer）；target 为 per-child（两侧均 128KB）。
+- E2E 为 **1 并发、120 s** 口径；客户端分解用 1% 采样（query/master/transfer）；target 为 per-child（两侧均 128KB）。
 - 给同口径对比表：E2E、query RPC、read/transfer、target W9/push/TOTAL（per child）、child/父数。
-- 标注：1 parent in flight、64×128KB、verify=false、日志 1% 采样、294k keys（非 500k）。
+- 标注：1 parent in flight、64×128KB、verify=false、120 s、日志 1% 采样、294k keys（非 500k）。
 - 不清理：master/target 保持运行。
 
 ## 回执必答（第一行）
 
-10 s 1t 探针的 FINAL/ per-key / N；A1'–A4' 是否完成；**每臂 child/父是否都=64**；每臂 queries/耗时/是否 WRAP；1 并发下的 E2E 与 target W9/C2H。
+10 s 探针的 FINAL/字节/120s 预估是否 ≤2.4663TB；A1'–A4' 是否都跑满 120 s；**每臂 child/父是否都=64**；每臂 queries/是否 WRAP；1 并发 120 s 下的 E2E 与 target W9/C2H。
