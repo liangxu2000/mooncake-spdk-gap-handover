@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-17（只读：1 并发客户端分解聚合，可执行）**；master/target/注册保持运行；不重启 target
+- 当前任务：**GAP-18（只读归因：RPC 121µs 拆成链路/提交/master 调度，可执行）**；master/target/注册保持运行；不重启 target
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -176,7 +176,8 @@
 | GAP-14 | 2026-11-19 | 同并发（1 parent in flight）配对 A/B：探针 → A1'/A2' Mooncake 1t → A3'/A4' urma -T1（`SPDK_URMA_MAX_IO_SIZE=131072` 目标 64×128KB）→ chunk/绕回校验 | 已完成（3/4 臂） | A1' 110.35s/294k/20.81GiB/s/avg 375.01/p99 412.19（64×128KB）；A2' 200.16s/11.48GiB/s/avg 680.50/p99 884.86（64）；A3' **硬拒**（max_io 131072 与 -o 8MiB 互斥）；**越权**跑 A3p2 native 32×256KB：120s/457,307 IO/30.49GiB/s/avg 262.32/p99 427.52；A4' 未跑。关键：1 并发 seq 下 target TOTAL 对 chunk 不敏感（124 vs 122µs），Mooncake E2E 375 vs urma 262 → **+113µs**；rand target W9 272µs。**决定：不重启 -R128；改 Mooncake 262144 对齐 32×256KB** |
 | GAP-15 | 2026-11-19 | 32×256KB 对齐（Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`）：10s 1t 探针（120s 预估 ≤2.4663TB 否则停手）→ A1''/A2'' Mooncake seq/rand 1t（120s，seed 0/42）→ A3''复用 A3p2 → A4'' urma rand native（120s）→ child/父=32 硬门 + 绕回校验 | 已中止（D15-1 停手门） | 10s 探针 21.58 GB/s（20.10 GiB/s）→ 120s 需 **2.5897 TB**（308,715 keys）> 现有 2.4719 TB（294,669 keys）；源码 `key_idx % total_keys`（`stress_cluster_bench.cpp:1534`）证实会循环回绕；最大不绕回 114.28 s（294k）。开发侧裁定 **③ 补数据**（不选 103/114 s），转 GAP-16 |
 | GAP-16 | 2026-11-19 | 补数据 + 同窗口四臂：源码核对增量前提 → 增量补灌到 **400,000 keys（3,355,443,200,000 B）** → 10s 探针（child/父=32、120s 预估 ≤3.3554TB）→ A1''/A3''/A2''/A4'' 各 120s（seed 0 / 0 / 42 / 42）→ 绕回校验 + 分析 | 已完成 | 补灌 `400000 succeeded, 0 failed`、alloc 精确 3,355,443,200,000（28.3 min；增量语义生效：alloc 自 Written≈296,040 才上涨）；探针 19.54 GiB/s、120s 预估 **2.5164TB** ≤3.3554TB PASS、802,785÷25,087=32.00；四臂全 120s、failed=0、**无 WRAP**、**child/父=32.00**：A1'' **387.23**（P50 389.12/P90 397.31/P99 417.79/max 31,466）、A3'' **258.60**（P50 252.16/P99 401.92/max 18,009）、A2'' **699.61**（P50 688.13/P99 909.31）、A4'' **480.00**（P50 517.12/P99 732.16）；**seq gap 128.6µs 全在客户端+网络**（target TOTAL 121 vs 124，MC 反而快 3µs），rand gap 219.6µs = target +72 + 客户端+网络 +147.6；target W9：seq 69.10/71.88、rand 311.21/234.89。**chunk 256KB 未缩小 seq gap（375→387µs）** |
-| GAP-17 | 2026-11-19 | 只读：用 GAP-16 已有的 1% 采样日志把 1 并发客户端时间拆开（query RPC / master 子段 / transfer / 其他），并与 E2E、A3''/A4'' 对账；不跑负载 | 待执行 | — |
+| GAP-17 | 2026-11-19 | 只读：用 GAP-16 已有的 1% 采样日志把 1 并发客户端时间拆开（query RPC / master 子段 / transfer / 其他），并与 E2E、A3''/A4'' 对账；不跑负载 | 已完成 | seq：query **120.88**（master 108.75 = rpc_call 95.35（submit 41 / after-submit 47）+ client_overhead 13.39）、read 274.07（transfer 267.64，wait 261.55）、其他 2.00、gi_total 396.95；rand：query 121.84、read 588.83、gi_total 712.38；**全量 query_rpc_breakdown** avg 109.98/112.35、P50 108/110、min 83/84、seq 89.1% 落 100–119µs；**seq gap 128.6µs 中 120.9µs（94%）由 query 解释，数据路径残差仅 7.75µs**；rand gap 219.6 = query 121.8 + 数据残差 97.8。对账：gi_total 比 E2E 高 2.5%（1% 采样开销）；checksum/prepare 在 read 路径不存在（字段缺失，非 0） |
+| GAP-18 | 2026-11-19 | 只读归因：从已有日志补 `pool_acquire_dispatch_us` 与跨线程切换（caller/callback/submit 线程）；ping 双向 ICMP RTT；10s 探针期间 `ss -ti` 取 TCP 内核 RTT；master/target 的核绑定与 CPU 竞争；IB 设备存在性（`MC_RPC_PROTOCOL=rdma` 可行性）；不重启 master/target | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -1199,3 +1200,47 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 ## 回执必答（第一行）
 
 1 并发下 A1''/A2'' 的 query、master、transfer（submit/wait）、其他各是多少（avg/P50/P99）；query 直方图是否集中在固定值；seq gap 128.6µs 是否可全部由 query 解释。
+
+---
+
+# GAP-18（待执行 · 只读归因 · 2026-11-19）· RPC 121µs 拆成：链路 RTT / 客户端提交 / master 调度
+
+> **已确认（GAP-17）**：seq gap 128.6µs 中 **120.9µs（94%）是 query**；query 内 master RPC 108.75 = rpc_call 95.35（submit 41 / after-submit 47）+ client_overhead 13.39；全量 query 直方图 min 83µs、89.1% 在 100–119µs。**下一步只回答一个问题：这 ~95µs 里有多少是"线缆 RTT"，有多少是两端栈/调度。**
+> 约束：**只读 + 一条 10s 探针**；不重启 master/target、不改代码/bench、不动注册；gap-only。
+
+## 0. 已有日志补字段（零成本，先做）
+
+- 从 `~/gap/g16/A1pp_mc_seq.log`、`A2pp_mc_rand.log` 的 `master_rpc_client_breakdown` 行（1% 采样，3,004/1,611 条）聚合：
+  - `pool_call_us`、**`pool_acquire_dispatch_us`**、`client_submit_us`、`pool_after_submit_us` 的 avg/P50/P90/P99；
+  - 线程关系：`caller_tid` vs `callback_tid` vs `submit_tid` vs `pool_return_tid` 的**相等/不等计数**（不等 = 跨线程唤醒）。
+- 从 bench 日志取 `Master RPC pool config:` 与 `Warming up master RPC pool` 两行（max_connection / idle 超时 / 预热连接数）。
+
+## 1. 链路 RTT（只读）
+
+- node1 → node3：`ping -c 20 -i 0.2 <node3-ip>`；node3 → node1 同样一次。报 min/avg/max/mdev（双向）。
+- node1 与 node3：`nproc`；`ls /sys/class/infiniband 2>/dev/null; ibv_devices 2>/dev/null`（仅记录是否存在 IB verbs 设备，供 `MC_RPC_PROTOCOL=rdma` 可行性判断，**不尝试切换**）。
+
+## 2. 10s 探针 + TCP 内核 RTT（只读负载）
+
+- 探针命令同 GAP-16 §2（MC seq、`-duration 10`、`-num_keys 400000`、`MC_NOF_SUBMIT_CHUNK_BYTES=262144`、`-verify=false`、采样 0.01、无 trace），日志 `~/gap/g18/probe10.log`。
+- 探针运行期间（4 次，间隔 2s）：
+  - node1：`ss -tin dst <node3-ip>` → 保存原始输出（要含 `:50056` 那条的 `rtt:` / `rttvar:` / `snd_cwnd` / `retrans`）；
+  - node3：`ss -tin 'sport = :50056'` → 保存原始输出（服务端视角 RTT）。
+- 探针结束后再各采一次。
+
+## 3. master / target 的核与 CPU（只读）
+
+- node3：`MP=$(pgrep -f mooncake_master | head -1)`；`taskset -pc $MP`；`cat /proc/$MP/status | grep Cpus_allowed_list`；`ps -L -o tid,psr,pcpu,stat,comm -p $MP`（两次，间隔 2s）。
+- node3：`TP=$(pgrep -f nvmf_tgt | head -1)`；`taskset -pc $TP`；`nproc`。
+- 目的：master 线程是否落在 target 的 reactor 核（`-m 0xfc` 对应核）上、是否被自旋 reactor 抢占。
+
+## 4. 分析 / 回执
+
+- 表：ICMP RTT（双向）｜TCP 内核 RTT（客户端/服务端视角）｜query avg（本探针）｜`pool_acquire_dispatch` / `submit` / `after_submit`（已有日志）｜跨线程计数。
+- 明确回答：**95µs 的 rpc_call 里，线缆 RTT 占多少？** 若 ICMP/TCP RTT ≈ 80–100µs → 基本是链路，优化只能走拓扑或去掉 RPC；若 RTT ≈ 10–20µs → 栈/调度占大头，给出具体落在 submit 还是 after-submit、是否跨线程。
+- 报 master 线程的核分布与 target reactor 核是否重叠。
+- 不做任何修改；master/target 保持运行。
+
+## 回执必答（第一行）
+
+ICMP 双向 RTT、TCP 内核 RTT（客户端/服务端）各是多少；`pool_acquire_dispatch_us` / `client_submit_us` / `pool_after_submit_us` 各多少；submit 是否跨线程；master 线程与 target reactor 是否同核；据此 rpc_call 95µs 中链路占多少。
