@@ -6,7 +6,7 @@
 - 权限：**只 pull，不要 push**；本仓不接收反向提交
 - 回执：按下方《回执格式》在会话里输出，由用户转交
 - 最后更新：2026-11-19
-- 当前任务：**GAP-18（只读归因：RPC 121µs 拆成链路/提交/master 调度，可执行）**；master/target/注册保持运行；不重启 target
+- 当前任务：**GAP-19（env-only：客户端 RPC 栈 4 组配置 × 10s 探针，可执行）**；master/target/注册保持运行；不重启 target
 
 > **编号变更（2026-11-19，用户定名）**：序列名由用户定为 `GAP-xx`（本项目自有，不沿用同事的 Round 编号）。
 > 原 `R7-01` / `R7-02` 已更名为 `GAP-01` / `GAP-02`。若你正在执行旧任务号 `R7-02`，继续执行完即可，回执按 `GAP-02` 登记。
@@ -177,7 +177,8 @@
 | GAP-15 | 2026-11-19 | 32×256KB 对齐（Mooncake `MC_NOF_SUBMIT_CHUNK_BYTES=262144`）：10s 1t 探针（120s 预估 ≤2.4663TB 否则停手）→ A1''/A2'' Mooncake seq/rand 1t（120s，seed 0/42）→ A3''复用 A3p2 → A4'' urma rand native（120s）→ child/父=32 硬门 + 绕回校验 | 已中止（D15-1 停手门） | 10s 探针 21.58 GB/s（20.10 GiB/s）→ 120s 需 **2.5897 TB**（308,715 keys）> 现有 2.4719 TB（294,669 keys）；源码 `key_idx % total_keys`（`stress_cluster_bench.cpp:1534`）证实会循环回绕；最大不绕回 114.28 s（294k）。开发侧裁定 **③ 补数据**（不选 103/114 s），转 GAP-16 |
 | GAP-16 | 2026-11-19 | 补数据 + 同窗口四臂：源码核对增量前提 → 增量补灌到 **400,000 keys（3,355,443,200,000 B）** → 10s 探针（child/父=32、120s 预估 ≤3.3554TB）→ A1''/A3''/A2''/A4'' 各 120s（seed 0 / 0 / 42 / 42）→ 绕回校验 + 分析 | 已完成 | 补灌 `400000 succeeded, 0 failed`、alloc 精确 3,355,443,200,000（28.3 min；增量语义生效：alloc 自 Written≈296,040 才上涨）；探针 19.54 GiB/s、120s 预估 **2.5164TB** ≤3.3554TB PASS、802,785÷25,087=32.00；四臂全 120s、failed=0、**无 WRAP**、**child/父=32.00**：A1'' **387.23**（P50 389.12/P90 397.31/P99 417.79/max 31,466）、A3'' **258.60**（P50 252.16/P99 401.92/max 18,009）、A2'' **699.61**（P50 688.13/P99 909.31）、A4'' **480.00**（P50 517.12/P99 732.16）；**seq gap 128.6µs 全在客户端+网络**（target TOTAL 121 vs 124，MC 反而快 3µs），rand gap 219.6µs = target +72 + 客户端+网络 +147.6；target W9：seq 69.10/71.88、rand 311.21/234.89。**chunk 256KB 未缩小 seq gap（375→387µs）** |
 | GAP-17 | 2026-11-19 | 只读：用 GAP-16 已有的 1% 采样日志把 1 并发客户端时间拆开（query RPC / master 子段 / transfer / 其他），并与 E2E、A3''/A4'' 对账；不跑负载 | 已完成 | seq：query **120.88**（master 108.75 = rpc_call 95.35（submit 41 / after-submit 47）+ client_overhead 13.39）、read 274.07（transfer 267.64，wait 261.55）、其他 2.00、gi_total 396.95；rand：query 121.84、read 588.83、gi_total 712.38；**全量 query_rpc_breakdown** avg 109.98/112.35、P50 108/110、min 83/84、seq 89.1% 落 100–119µs；**seq gap 128.6µs 中 120.9µs（94%）由 query 解释，数据路径残差仅 7.75µs**；rand gap 219.6 = query 121.8 + 数据残差 97.8。对账：gi_total 比 E2E 高 2.5%（1% 采样开销）；checksum/prepare 在 read 路径不存在（字段缺失，非 0） |
-| GAP-18 | 2026-11-19 | 只读归因：从已有日志补 `pool_acquire_dispatch_us` 与跨线程切换（caller/callback/submit 线程）；ping 双向 ICMP RTT；10s 探针期间 `ss -ti` 取 TCP 内核 RTT；master/target 的核绑定与 CPU 竞争；IB 设备存在性（`MC_RPC_PROTOCOL=rdma` 可行性）；不重启 master/target | 待执行 | — |
+| GAP-18 | 2026-11-19 | 只读归因：从已有日志补 `pool_acquire_dispatch_us` 与跨线程切换（caller/callback/submit 线程）；ping 双向 ICMP RTT；10s 探针期间 `ss -ti` 取 TCP 内核 RTT；master/target 的核绑定与 CPU 竞争；IB 设备存在性（`MC_RPC_PROTOCOL=rdma` 可行性）；不重启 master/target | 已完成 | **链路下限 ≈40µs**：ICMP 41（n1→n3）/49（n3→n1）；TCP minrtt 38–56µs、retrans=0。**栈/调度 ≈46–57µs**：pool_call 93.65 = acquire 2.04 + **submit 43.73** + **after-submit 46.90**（rand 97.44 = 1.98+37.90+56.61）。**submit 100% 跨线程**（caller≠submit 3004/3004；submit==pool_return 3004/3004；caller==callback same）。**无核竞争**：master 43 线程、0 个在 target 核 2–7（target 6 reactor 99.7–99.9% 自旋）；两侧 nproc=308。**IB verbs 设备存在**（rocep166s0f0/f1 + ipourma/udmac），但 RPC 走 TCP，`MC_RPC_PROTOCOL=rdma` 需重启 master。pool max_connection=100、预热 100 连接、short_idle=1000ms。D18-1：`pgrep -f mooncake_master` 会命中 sudo 包装进程，需按线程数筛真身 |
+| GAP-19 | 2026-11-19 | **env-only** 客户端 RPC 栈实验（4×10s 探针，不动 master/target/数据）：P0 基线 / P1 `MC_YLT_RPC_POOL_MAX_CONNECTION=1` / P2 `MC_STORE_RPC_CLIENT_IO_THREADS=1` / P3 taskset 单 NUMA + max_connection=1；对比 query/submit/after-submit/E2E 与线程落核 | 待执行 | — |
 | GAP-07 | 2026-11-19 | 构建 + 首轮实测（待 GAP-06）：gap 内 clone 最新 SPDK/Mooncake → 应用/移植补丁 → 编译 → 验证 → target(4457)/master(50056/8086/9006) + 注册 + 3.81 TiB prefill → 6 臂 × 60 s | 待执行 | — |
 
 ---
@@ -1244,3 +1245,41 @@ A1/A2 的客户端分解（query/master/transfer/其他）；breakdown 日志开
 ## 回执必答（第一行）
 
 ICMP 双向 RTT、TCP 内核 RTT（客户端/服务端）各是多少；`pool_acquire_dispatch_us` / `client_submit_us` / `pool_after_submit_us` 各多少；submit 是否跨线程；master 线程与 target reactor 是否同核；据此 rpc_call 95µs 中链路占多少。
+
+---
+
+# GAP-19（待执行 · env-only · 2026-11-19）· 客户端 RPC 栈配置实验：submit 43.7µs 能否从配置层降下来
+
+> **已确认（GAP-18）**：`rpc_call 95.35 = acquire 2.04 + submit 43.73 + after-submit 46.90`（seq）；链路下限 ≈40µs；**submit 100% 跨线程**（caller≠submit，submit==pool_return）；master/target 无核竞争。
+> **待验证假设**：客户端 RPC pool 默认 `max_connection=100`、预热 100 连接，单并发下请求可能在多个连接/执行线程之间跳，导致每次 40µs 级跨线程唤醒。把连接/IO 线程收敛，可能显著降低 submit/after-submit。
+> **目标**：只改**客户端进程**的 env 与亲和性，找出 submit/after-submit 的可配置空间；**不动 master/target/注册/数据、不改代码**。
+> 约束：4 个变体各一条 **10 s 探针**（同 GAP-16 §2：MC seq、`-duration 10`、`-num_keys 400000`、`MC_NOF_SUBMIT_CHUNK_BYTES=262144`、`-verify=false`、`MC_HIFREQ_LOG_SAMPLE_RATE=0.01`、无 trace）；合计 ≤10 min；10 s 读量不会绕回。
+
+## 0. 只读准备
+
+- node1：`numactl -H`（或 `lscpu -e`）取 NUMA 节点与 CPU 列表；选一个 NUMA 的连续 8–16 个核记为 `$CORES`。
+- P0 运行中采一次 bench 线程落核：`ps -L -o pid,tid,psr,pcpu,comm -p <bench_pid> | head -30`；记录 `$CORES` 所属 NUMA。
+
+## 1. 四个变体（每个独立进程，日志 `~/gap/g19/P0.log` … `P3.log`）
+
+| 变体 | 额外 env / 亲和 | 目的 |
+|---|---|---|
+| **P0** | 无（基线复测） | 复现 GAP-18 的 submit 43.7 / after 46.9 |
+| **P1** | `MC_YLT_RPC_POOL_MAX_CONNECTION=1`（可加 `MC_YLT_RPC_POOL_WARMUP_CONNECTIONS=1`） | 单连接 |
+| **P2** | `MC_STORE_RPC_CLIENT_IO_THREADS=1` | 单 IO 线程（连接仍 100） |
+| **P3** | P1 + `taskset -c $CORES` 包住整个探针进程 | 单连接 + 同 NUMA |
+
+- 每变体记录：FINAL（avg/P50/P90/P99/max）、failed、查询数；沿用 GAP-17/18 的聚合脚本给 `query / master / rpc_call / acquire / submit / after-submit / client_overhead`。
+- P3 运行中 `ps -L -o tid,psr,comm -p <pid>`，确认线程都在 `$CORES` 内。
+- 任一变体 failed>0 / 无 FINAL → 停手回报。
+
+## 2. 分析 / 回执
+
+- 表：P0–P3 的 `query avg / submit / after-submit / rpc_call / E2E avg`（µs）+ 线程落核/NUMA。
+- 结论：**submit 43.7µs 是否可配置层降低？降了多少？after-submit 是否同步变化？**
+- 若某变体明显更低：记为候选配置（下一单用该配置复测四臂，再决定是否采用）。
+- 不动 master/target/数据；不清理。
+
+## 回执必答（第一行）
+
+P0–P3 各自的 query/submit/after-submit/rpc_call/E2E；submit 是否从 43.7µs 明显下降、降了多少；P3 线程是否都在指定 NUMA。
